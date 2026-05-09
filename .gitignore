@@ -1,0 +1,28 @@
+# Local macOS artifacts
+.DS_Store
+
+# Local environment files
+.env
+.env.*
+
+# Source document buckets (do not publish)
+Resource/
+Resources/
+
+# Generated chunk/index/vector data
+data/indexes/
+data/qdrant/
+data/wiki/
+data/visual_previews/
+data/traces/
+data/*
+
+doc/
+
+# Frontend generated artifacts
+ui/react-dashboard/node_modules/
+ui/react-dashboard/dist/
+
+
+*.md*
+*.html*

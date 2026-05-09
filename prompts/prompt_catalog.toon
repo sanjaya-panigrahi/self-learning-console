@@ -1,0 +1,83 @@
+toon_version: "1.0"
+description: TOON = Token-Oriented Object Notation. This registry centralizes all LLM prompt templates with rationale and optimization scope.
+prompts[10]:
+  - id: generation.grounded_answer.v1
+    owner: app/generation/pipeline.py
+    why: Grounded answering from retrieved chunks; reduces hallucination by forcing context-only answers.
+    optimization_scope:
+      quality: high factual grounding
+      latency: medium
+      token_budget: bounded by retrieval top-k and excerpted chunks
+    template: "You are an enterprise knowledge assistant. Answer using only the provided context. If context is insufficient, say that clearly and ask a short clarifying question.\\n\\n{{domain_block}}User Question:\\n{{query}}\\n\\nRetrieved Context:\\n{{joined_context}}\\n\\nReturn a concise answer."
+  - id: warm_cache.qa_generation.v1
+    owner: app/jobs/warm_cache/job.py
+    why: Pre-computes semantic cache Q&A from source text for faster repeat retrieval.
+    optimization_scope:
+      quality: diverse WH-style enterprise questions
+      latency: batch precompute
+      token_budget: prompt_max_chars and questions_per_doc
+    template: "You are building a semantic training cache for enterprise document search.\\nGenerate practical WH-questions and questionnaire style Q&A from the source content.\\nReturn strict JSON with shape: {\"items\": [{\"question\": str, \"answer\": str, \"confidence\": float}]}.\\nCreate up to {{questions_per_doc}} items.\\nRules:\\n- Questions must be grounded in the source text only.\\n- Include diverse variants (what/why/how/when/where/who).\\n- Keep answers concise, factual, and implementation-oriented.\\n- Confidence must be between 0 and 1.\\nSource: {{source}}\\nContent:\\n{{merged}}"
+  - id: evaluation.judge_answer.v1
+    owner: app/evaluation/service.py
+    why: Automated QA scoring for benchmark runs.
+    optimization_scope:
+      quality: strict scoring rubric
+      latency: short JSON response
+      token_budget: compact context + citation serialization
+    template: "You are a strict QA evaluator for a RAG assistant. Score the answer on factuality, relevance to query, and usefulness using only the provided context. Return JSON only with keys: overall_score, factuality_score, relevance_score, usefulness_score, notes. All scores must be numbers in range [0,1]. notes must be short plain text.\\n\\nQUERY:\\n{{query}}\\n\\nEXPECTED (optional):\\n{{expected_answer}}\\n\\nANSWER:\\n{{answer}}\\n\\nCITATIONS:\\n{{citations_json}}\\n"
+  - id: retrieval.query_rewrite.v1
+    owner: app/retrieval/pipeline/query_rewrite.py
+    why: Improves recall by rewriting user query with domain keywords while preserving intent.
+    optimization_scope:
+      quality: higher retrieval recall
+      latency: low (single short generation)
+      token_budget: query-sized
+    template: "Rewrite the user query for RAG retrieval. Keep intent unchanged, include likely domain keywords, and return only one concise rewritten query line.\\n\\n{{domain_line}}User query: {{query}}\\nRewritten query:"
+  - id: retrieval.answer_synthesis.v1
+    owner: app/retrieval/service/synthesis.py
+    why: Converts retrieved snippets into concise JSON answer + calibrated confidence.
+    optimization_scope:
+      quality: structured answer output
+      latency: medium
+      token_budget: max_contexts and excerpt_limit
+    template: "Use only the retrieved context. Keep the answer concise and practical. Do not invent facts.\\n{{domain_block}}Question: {{query}}\\nContext:\\n{{joined_context}}\\n\\nReturn strict JSON only in this exact shape:\\n{\"answer\":\"<concise practical answer>\",\"confidence\":<number between 0 and 1>}\\nConfidence rules: 0.85+ when context strongly and directly supports the answer; 0.60-0.84 when partially supported; below 0.60 when context is weak or incomplete.\\nIf context is insufficient, say that briefly in answer and lower confidence accordingly."
+  - id: retrieval.material_insight.v1
+    owner: app/retrieval/insights.py
+    why: Produces training-grade material insights with mandatory structure and actionable outcomes.
+    optimization_scope:
+      quality: high-detail operational summaries
+      latency: moderate-to-high
+      token_budget: bounded prepared excerpts
+    template: "Analyze the training material excerpts and return strict JSON with keys: summary (string), key_topics (array of strings), critical_points (array of strings), suggested_questions (array of strings). Provide training-grade depth and actionable detail. The summary MUST follow this exact Knowledge Brief structure and heading order: 'Document:' line first, then '1. Executive Mission (The Why):', '2. Stakeholder Matrix (The Who):', '3. Operational Pillars (The What):', '4. Execution Roadmap (The How):', '5. Critical Safety & Risk Gates (The Watch Out):', and '6. Lifecycle Triggers (The When):'.\\n\\nFormatting requirements for summary:\\n- Start with: 'Document: [Document Title / Version] | Knowledge Brief'\\n- Section 1: 1-2 sentence mission and purpose.\\n- Section 2: include a compact role matrix with Role and Responsibility lines grounded in excerpts.\\n- Section 3: list the 3 most critical functional areas from the document.\\n- Section 4: provide a stepwise roadmap: Preparation, Targeting, Action, Verification.\\n- Section 5: provide a checklist using exactly these gate labels with [ ] markers: Dependency Check, Environment Sync, Approval Clarity, Rollback Ready.\\n- Section 6: describe lifecycle triggers under Routine, Onboarding, Incident Response.\\n\\nGrounding requirements:\\n- Use concrete details from excerpts: modules, systems, roles, rules, environments, audits, dependencies, and evidence.\\n- Ignore disclaimers, version history, table-of-contents text, and other front-matter boilerplate.\\n- Do not invent details not present in excerpts.\\n\\nQuestion quality requirements:\\n- Generate 8 to 12 suggested_questions.\\n- Questions must be document-grounded, materially different, and operationally useful.\\n- Cover workflows, validations, approvals, exceptions, troubleshooting, and role-based operations where applicable.\\n\\n{{domain_block}}Material source: {{source}}\\n\\nExcerpts:\\n{{combined}}\\n"
+  - id: retrieval.material_questions.v1
+    owner: app/retrieval/insight/llm.py
+    why: Expands document-grounded question bank for study and agent warm-up.
+    optimization_scope:
+      quality: high-value non-duplicate questions
+      latency: medium
+      token_budget: first N excerpts only
+    template: "You generate review-quality training questions from source excerpts.\\nMaterial label: {{material_label}}\\nReturn strict JSON only in this shape: {\"suggested_questions\":[\"...\"]}.\\nGenerate 8-12 concise, specific, non-generic questions.\\nDo not include notes/disclaimers inside module names.\\nAvoid duplicates and avoid repeating the same template.\\nQuestions should be operational and source-grounded.\\nIf a question already exists, produce alternatives instead.\\nExisting questions:\\n{{existing_block}}\\n\\nSource excerpts:\\n{{excerpts}}"
+  - id: deploy_intel.knowledge_card.v1
+    owner: app/jobs/deploy_intelligence/job.py
+    why: Converts source excerpts into normalized knowledge cards for wiki generation.
+    optimization_scope:
+      quality: schema-consistent cards
+      latency: moderate
+      token_budget: merged excerpt capped
+    template: "Read the document excerpt and create a strict JSON knowledge card.\\nOutput JSON only with shape: {\"title\": str, \"summary\": str, \"key_points\": [str], \"entities\": [str], \"concepts\": [str], \"policy_flags\": [str], \"expected_questions\": [str]}.\\n\"entities\" are named entities (systems, products, teams, people, regulations). \"concepts\" are broader thematic topics (workflows, capabilities, processes).\\nSource: {{source}}\\nDocument excerpt:\\n{{merged}}"
+  - id: deploy_intel.contradictions.v1
+    owner: app/jobs/deploy_intelligence/contradiction_detector.py
+    why: Detects direct conflicts across semantically related documents.
+    optimization_scope:
+      quality: high precision contradiction extraction
+      latency: pairwise by shared entities
+      token_budget: top key points only
+    template: "You are a fact-checking assistant. Compare the key points from two documents and identify ANY direct contradictions — where one document states something that directly conflicts with what the other document states about the same topic.\\n\\nDocument A: {{title_a}}\\nKey points:\\n{{kp_a_text}}\\n\\nDocument B: {{title_b}}\\nKey points:\\n{{kp_b_text}}\\n\\nReply with JSON only. If contradictions exist, output:\\n{\"contradictions\": [{\"claim_a\": \"...\", \"claim_b\": \"...\", \"explanation\": \"...\"}]}\\nIf no contradictions exist, output: {\"contradictions\": []}"
+  - id: deploy_intel.wiki_lint.v1
+    owner: app/jobs/deploy_intelligence/wiki_linter.py
+    why: Audits wiki quality and identifies coverage gaps/orphans/stale areas from cards.
+    optimization_scope:
+      quality: structured markdown lint report
+      latency: single digest call
+      token_budget: compact digest and bounded sections
+    template: "You are a project wiki quality auditor for a software/documentation repository. Review ONLY the provided knowledge-card digest and existing wiki page lists, then produce a structured lint report in markdown.\\n\\nHard constraints:\\n- Use ONLY evidence present in the provided digest and page lists.\\n- Do NOT introduce unrelated domains or generic examples not grounded in the digest.\\n- If a section has no findings, emit exactly one bullet: '* None found based on provided cards.'\\n- Keep bullets concise, factual, and repository-focused.\\n- Avoid speculation phrasing such as 'might include' unless paired with explicit evidence.\\n\\nKnowledge card digest:\\n{{digest}}\\n\\n{{existing_pages_text}}\\n\\nPlease write a lint report with EXACTLY these markdown sections:\\n## Orphan Topics\\nTopics frequently mentioned across multiple documents but lacking a dedicated wiki page. List up to 8 as bullet points with a brief reason and at least one source title in parentheses.\\n\\n## Coverage Gaps\\nImportant topic areas that appear underrepresented or missing from the corpus. List up to 6 as bullet points with source evidence in parentheses where possible.\\n\\n## Potential Contradictions\\nAreas where documents may describe conflicting behaviour or policy. List up to 5 as bullet points with the conflicting document names.\\n\\n## Stale Claims\\nAssertions in older documents that may be superseded by newer content. List up to 5 as bullet points with source titles indicating old/new where possible.\\n\\n## Suggested New Sources\\nTopics that would benefit from additional source documents. List up to 5 as bullet points.\\n\\n## Summary\\nOne short paragraph overall health assessment of this wiki corpus, strictly grounded in the digest."

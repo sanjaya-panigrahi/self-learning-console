@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+app/__init__.py
+app/main.py
+training_agent.egg-info/PKG-INFO
+training_agent.egg-info/SOURCES.txt
+training_agent.egg-info/dependency_links.txt
+training_agent.egg-info/requires.txt
+training_agent.egg-info/top_level.txt
