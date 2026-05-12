@@ -26,22 +26,8 @@ htmlcov/
 Resource/
 Resources/
 
-# Generated chunk/index/vector data
-data/indexes/
-data/qdrant/
-data/wiki/
-data/visual_previews/
-data/traces/
-data/*
-
-!data/
-!data/indexes/
-!data/raw/
-!data/raw/.gitkeep
-!data/processed/
-!data/processed/.gitkeep
-!data/indexes/lifecycle_manifest.json
-!data/indexes/.gitkeep
+# Generated chunk/index/vector data — completely ignore the entire data directory
+data/
 
 doc/
 
@@ -60,3 +46,6 @@ ui/react-dashboard/dist/
 # *.md* and *.html* rules removed — we want to preserve documentation
 *.md* 
 *.html* 
+*.json
+*.log
+*.csv
