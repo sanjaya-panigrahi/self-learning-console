@@ -13,7 +13,7 @@ COPY ui/react-dashboard ./
 RUN npm run build
 
 
-FROM ${PYTHON_BASE_IMAGE}
+FROM ${PYTHON_BASE_IMAGE} AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -32,6 +32,20 @@ COPY prompts ./prompts
 COPY --from=ui_builder /ui/dist ./ui/react-dashboard/dist
 COPY .env.example ./.env.example
 
+
+# --- test stage ---
+FROM base AS test
+
+RUN pip install --no-cache-dir pytest pytest-asyncio httpx
+
+COPY tests ./tests
+
+CMD ["python", "-m", "pytest", "tests/unit", "-q", "--tb=short"]
+
+
+# --- runtime stage ---
+FROM base AS runtime
+
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

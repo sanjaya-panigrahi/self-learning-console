@@ -7,6 +7,7 @@ from app.api.schemas.chat import ChatRequest, ChatResponse
 from app.conversation.session.store import get_session_store
 from app.core.config.settings import get_settings
 from app.retrieval.service import search_retrieval_material
+from app.security import guard_chat_request, guard_domain_context, guard_chat_response
 
 router = APIRouter()
 
@@ -48,7 +49,23 @@ def chat(payload: ChatRequest) -> ChatResponse:
     settings = get_settings()
     store = get_session_store()
 
-    merged_domain_context = (payload.domain_context or "").strip()
+    input_guard = guard_chat_request(payload.query)
+    if not bool(input_guard.get("ok")):
+        return {
+            "answer": f"Request blocked: {input_guard.get('reason', 'invalid_input')}",
+            "citations": [],
+            "confidence": 0.0,
+        }
+
+    content_guard = guard_domain_context(payload.domain_context)
+    if not bool(content_guard.get("ok")):
+        return {
+            "answer": f"Request blocked: {content_guard.get('reason', 'invalid_context')}",
+            "citations": [],
+            "confidence": 0.0,
+        }
+
+    merged_domain_context = str(content_guard.get("domain_context") or "").strip()
     if payload.session_id and _should_use_session_context(payload.query):
         session_context = store.get_recent_context(
             payload.session_id,
@@ -62,17 +79,20 @@ def chat(payload: ChatRequest) -> ChatResponse:
             )
 
     response = search_retrieval_material(
-        query=payload.query,
+        query=str(input_guard.get("query") or payload.query),
         domain_context=merged_domain_context or None,
         top_k=max(3, int(getattr(settings, "retrieval_top_k", 3))),
     )
 
+    output_guard = guard_chat_response(str(response.get("answer", "")))
+    safe_answer = str(output_guard.get("answer", "")).strip()
+
     if payload.session_id:
-        store.append(payload.session_id, payload.query, role="user")
-        store.append(payload.session_id, str(response.get("answer", "")), role="assistant")
+        store.append(payload.session_id, str(input_guard.get("query") or payload.query), role="user")
+        store.append(payload.session_id, safe_answer, role="assistant")
 
     return {
-        "answer": str(response.get("answer", "")),
+        "answer": safe_answer,
         "citations": response.get("citations", []) or [],
         "confidence": float(response.get("answer_confidence", 0.0) or 0.0),
     }
@@ -83,7 +103,43 @@ def chat_stream(payload: ChatRequest) -> StreamingResponse:
     settings = get_settings()
     store = get_session_store()
 
-    merged_domain_context = (payload.domain_context or "").strip()
+    input_guard = guard_chat_request(payload.query)
+    if not bool(input_guard.get("ok")):
+        blocked = json.dumps(
+            {
+                "answer": f"Request blocked: {input_guard.get('reason', 'invalid_input')}",
+                "citations": [],
+                "confidence": 0.0,
+            }
+        )
+
+        def _blocked_stream() -> str:
+            yield "event: start\n"
+            yield "data: {}\n\n"
+            yield "event: end\n"
+            yield f"data: {blocked}\n\n"
+
+        return StreamingResponse(_blocked_stream(), media_type="text/event-stream")
+
+    content_guard = guard_domain_context(payload.domain_context)
+    if not bool(content_guard.get("ok")):
+        blocked = json.dumps(
+            {
+                "answer": f"Request blocked: {content_guard.get('reason', 'invalid_context')}",
+                "citations": [],
+                "confidence": 0.0,
+            }
+        )
+
+        def _blocked_stream_ctx() -> str:
+            yield "event: start\n"
+            yield "data: {}\n\n"
+            yield "event: end\n"
+            yield f"data: {blocked}\n\n"
+
+        return StreamingResponse(_blocked_stream_ctx(), media_type="text/event-stream")
+
+    merged_domain_context = str(content_guard.get("domain_context") or "").strip()
     if payload.session_id and _should_use_session_context(payload.query):
         session_context = store.get_recent_context(
             payload.session_id,
@@ -97,16 +153,19 @@ def chat_stream(payload: ChatRequest) -> StreamingResponse:
             )
 
     response = search_retrieval_material(
-        query=payload.query,
+        query=str(input_guard.get("query") or payload.query),
         domain_context=merged_domain_context or None,
         top_k=max(3, int(getattr(settings, "retrieval_top_k", 3))),
     )
 
-    if payload.session_id:
-        store.append(payload.session_id, payload.query, role="user")
-        store.append(payload.session_id, str(response.get("answer", "")), role="assistant")
+    output_guard = guard_chat_response(str(response.get("answer", "")))
+    safe_answer = str(output_guard.get("answer", "")).strip()
 
-    answer = str(response.get("answer", ""))
+    if payload.session_id:
+        store.append(payload.session_id, str(input_guard.get("query") or payload.query), role="user")
+        store.append(payload.session_id, safe_answer, role="assistant")
+
+    answer = safe_answer
     words = answer.split()
 
     def _stream() -> str:

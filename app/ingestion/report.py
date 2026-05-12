@@ -81,7 +81,8 @@ def build_report(
     duplicate_files = [item for item in file_results if item["status"] == "duplicate"]
     has_warning = bool(failed_files) or vector_backend_status.get("status") == "failed"
 
-    vector_backend = getattr(__import__("app.core.config.settings", fromlist=["get_settings"]).get_settings(), "vector_backend", "local")
+    vector_backend = getattr(get_settings(), "vector_backend", "local")
+    data_indexes_dir = Path(getattr(get_settings(), "data_indexes_dir", Path("data/indexes")))
 
     return {
         "status": "completed_with_warnings" if has_warning else "completed",
@@ -93,6 +94,7 @@ def build_report(
         "password_detected_files": len(pii_files),
         "pending_review_files": len(pending_review_files),
         "vector_backend": vector_backend,
+        "data_lifecycle_manifest_path": str(data_indexes_dir / "lifecycle_manifest.json"),
         "vector_backend_status": vector_backend_status,
         "files": file_results,
     }

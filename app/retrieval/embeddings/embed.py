@@ -1,8 +1,13 @@
 """Embedding generation via Ollama."""
 
+import logging
+
 import httpx
 
 from app.core.config.settings import get_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 def embed_text(text: str) -> list[float]:
@@ -21,26 +26,31 @@ def embed_text(text: str) -> list[float]:
     # Allow up to 30s for embeddings — Ollama may be slow when LLM inference is running concurrently.
     embed_read_timeout = min(float(settings.ollama_timeout_seconds), 30.0)
     ollama_timeout = httpx.Timeout(connect=5.0, read=embed_read_timeout, write=5.0, pool=5.0)
-    with httpx.Client(timeout=ollama_timeout) as client:
-        # Prefer the current Ollama embedding endpoint.
-        response = client.post(
-            f"{settings.ollama_base_url}/api/embed",
-            json={"model": settings.embedding_model, "input": text},
-        )
-        if response.status_code == 404:
-            # Backward-compatibility with older Ollama versions.
-            legacy = client.post(
-                f"{settings.ollama_base_url}/api/embeddings",
-                json={"model": settings.embedding_model, "prompt": text},
+    try:
+        with httpx.Client(timeout=ollama_timeout) as client:
+            # Prefer the current Ollama embedding endpoint.
+            response = client.post(
+                f"{settings.ollama_base_url}/api/embed",
+                json={"model": settings.embedding_model, "input": text},
             )
-            if legacy.status_code == 404:
-                return []
-            legacy.raise_for_status()
-            return legacy.json().get("embedding", [])
+            if response.status_code == 404:
+                # Backward-compatibility with older Ollama versions.
+                legacy = client.post(
+                    f"{settings.ollama_base_url}/api/embeddings",
+                    json={"model": settings.embedding_model, "prompt": text},
+                )
+                if legacy.status_code == 404:
+                    return []
+                legacy.raise_for_status()
+                return legacy.json().get("embedding", [])
 
-        response.raise_for_status()
-        payload = response.json()
-        embeddings = payload.get("embeddings", [])
-        if not embeddings:
-            return []
-        return embeddings[0]
+            response.raise_for_status()
+            payload = response.json()
+            embeddings = payload.get("embeddings", [])
+            if not embeddings:
+                return []
+            return embeddings[0]
+    except (httpx.TimeoutException, httpx.HTTPError, ValueError) as exc:
+        # Degrade gracefully so retrieval can continue with lexical/local fallback.
+        logger.warning("Embedding request failed; falling back without query vector: %s", exc)
+        return []

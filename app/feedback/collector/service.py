@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 from typing import Any
+import tempfile
+import os
 
 from app.core.config.settings import get_settings
 
@@ -35,7 +37,11 @@ def _save_records(path: Path, records: list[dict[str, Any]]) -> None:
         "count": len(records),
         "records": records,
     }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    content = json.dumps(payload, ensure_ascii=False, indent=2)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False, suffix=".tmp") as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    os.replace(tmp_path, path)
 
 
 def record_feedback(

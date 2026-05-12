@@ -1,5 +1,4 @@
 from fastapi.testclient import TestClient
-import httpx
 import json
 
 from app.ingestion.pipeline import run_ingestion
@@ -27,7 +26,7 @@ def test_reindex_endpoint(monkeypatch) -> None:
             "files": [],
         }
 
-    monkeypatch.setattr("app.api.routes.admin.run_reindex", fake_run_reindex)
+    monkeypatch.setattr("app.api.routes.admin_ingestion.trigger_ingestion_job", fake_run_reindex)
 
     response = client.post("/api/admin/reindex")
     assert response.status_code == 200
@@ -38,7 +37,7 @@ def test_reindex_endpoint(monkeypatch) -> None:
 def test_upload_training_content(monkeypatch, tmp_path) -> None:
     client = TestClient(app)
 
-    monkeypatch.setattr("app.api.routes.admin.resolve_ingestion_source_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.api.routes.admin_ingestion.resolve_ingestion_source_dir", lambda: tmp_path)
 
     response = client.post(
         "/api/admin/upload",
@@ -54,7 +53,7 @@ def test_upload_training_content(monkeypatch, tmp_path) -> None:
 def test_upload_accepts_pdf_extension(monkeypatch, tmp_path) -> None:
     client = TestClient(app)
 
-    monkeypatch.setattr("app.api.routes.admin.resolve_ingestion_source_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.api.routes.admin_ingestion.resolve_ingestion_source_dir", lambda: tmp_path)
 
     response = client.post(
         "/api/admin/upload",
@@ -69,7 +68,7 @@ def test_upload_accepts_pdf_extension(monkeypatch, tmp_path) -> None:
 def test_upload_accepts_csv_extension(monkeypatch, tmp_path) -> None:
     client = TestClient(app)
 
-    monkeypatch.setattr("app.api.routes.admin.resolve_ingestion_source_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.api.routes.admin_ingestion.resolve_ingestion_source_dir", lambda: tmp_path)
 
     response = client.post(
         "/api/admin/upload",
@@ -84,7 +83,7 @@ def test_upload_accepts_csv_extension(monkeypatch, tmp_path) -> None:
 def test_upload_rejects_unsupported_extension(monkeypatch, tmp_path) -> None:
     client = TestClient(app)
 
-    monkeypatch.setattr("app.api.routes.admin.resolve_ingestion_source_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.api.routes.admin_ingestion.resolve_ingestion_source_dir", lambda: tmp_path)
 
     response = client.post(
         "/api/admin/upload",
@@ -98,23 +97,13 @@ def test_upload_rejects_unsupported_extension(monkeypatch, tmp_path) -> None:
 def test_chat_endpoint_with_mocked_ollama(monkeypatch) -> None:
     client = TestClient(app)
 
-    class FakeSettings:
-        llm_provider = "ollama"
-
     monkeypatch.setattr(
-        "app.api.routes.chat.retrieve_context",
-        lambda query: [
-            {
-                "source": "policy.txt",
-                "chunk_id": "policy-chunk-0001",
-                "text": "Manifest upload requires UTF-8 CSV and valid headers.",
-            }
-        ],
-    )
-    monkeypatch.setattr("app.generation.pipeline.get_settings", lambda: FakeSettings())
-    monkeypatch.setattr(
-        "app.generation.pipeline._call_ollama",
-        lambda prompt: "Manifest upload requires UTF-8 CSV and valid headers.",
+            "app.api.routes.chat.search_retrieval_material",
+            lambda query, domain_context=None, top_k=3: {
+                "answer": "Manifest upload requires UTF-8 CSV and valid headers.",
+                "citations": [{"source": "policy.txt", "chunk_id": "policy-chunk-0001"}],
+                "answer_confidence": 0.75,
+            },
     )
 
     response = client.post(
@@ -133,28 +122,17 @@ def test_chat_endpoint_with_mocked_ollama(monkeypatch) -> None:
 def test_chat_endpoint_returns_ollama_fallback_on_error(monkeypatch) -> None:
     client = TestClient(app)
 
-    class FakeSettings:
-        llm_provider = "ollama"
-
     monkeypatch.setattr(
-        "app.api.routes.chat.retrieve_context",
-        lambda query: [
-            {
-                "source": "policy.txt",
-                "chunk_id": "policy-chunk-0001",
-                "text": "Manifest upload requires UTF-8 CSV and valid headers.",
-            }
-        ],
+            "app.api.routes.chat.search_retrieval_material",
+            lambda query, domain_context=None, top_k=3: {
+                "answer": (
+                    "I could not reach the local Ollama model. "
+                    "Please check that Ollama is running and the configured model is pulled."
+                ),
+                "citations": [{"source": "policy.txt", "chunk_id": "policy-chunk-0001"}],
+                "answer_confidence": 0.2,
+            },
     )
-    monkeypatch.setattr("app.generation.pipeline.get_settings", lambda: FakeSettings())
-
-    request = httpx.Request("POST", "http://127.0.0.1:11434/api/generate")
-    response = httpx.Response(503, request=request)
-
-    def raise_http_error(prompt: str) -> str:
-        raise httpx.HTTPStatusError("service unavailable", request=request, response=response)
-
-    monkeypatch.setattr("app.generation.pipeline._call_ollama", raise_http_error)
 
     response = client.post(
         "/api/chat",
@@ -315,7 +293,7 @@ def test_hidden_dashboard_renders_report(monkeypatch) -> None:
     client = TestClient(app)
 
     monkeypatch.setattr(
-        "app.api.routes.admin.get_last_ingestion_report",
+           "app.api.routes.admin_ingestion.get_ingestion_report",
         lambda: {
             "status": "completed_with_warnings",
             "source_dir": "../Resources",
@@ -382,7 +360,7 @@ def test_approve_pii_endpoint(monkeypatch) -> None:
     client = TestClient(app)
 
     monkeypatch.setattr(
-        "app.api.routes.admin.approve_file_for_ingestion",
+           "app.api.routes.admin_ingestion.approve_file_for_ingestion",
         lambda file_path, approved_by, reason: {
             "status": "approved",
             "file": file_path,
@@ -421,7 +399,7 @@ def test_material_insight_endpoint_forwards_use_cache(monkeypatch) -> None:
         captured["use_cache"] = use_cache
         return {"source": source, "summary": "ok"}
 
-    monkeypatch.setattr("app.api.routes.admin.get_material_insight", fake_get_material_insight)
+    monkeypatch.setattr("app.api.routes.admin_retrieval.get_material_insight", fake_get_material_insight)
 
     response = client.post(
         "/api/admin/material-insight",
@@ -459,7 +437,7 @@ def test_material_insight_stream_emits_progress_and_result(monkeypatch) -> None:
             "summary": "streamed",
         }
 
-    monkeypatch.setattr("app.api.routes.admin.get_material_insight", fake_get_material_insight)
+    monkeypatch.setattr("app.api.routes.admin_ingestion.get_material_insight", fake_get_material_insight)
 
     response = client.post(
         "/api/admin/material-insight-stream",

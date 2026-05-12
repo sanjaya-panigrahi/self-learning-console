@@ -35,6 +35,7 @@ def retrieval_search(request: RetrievalSearchRequest) -> dict[str, object]:
         query=request.query,
         domain_context=request.domain_context,
         top_k=request.top_k,
+        orchestrator=request.orchestrator,
     )
 
 

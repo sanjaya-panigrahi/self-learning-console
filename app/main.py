@@ -1,4 +1,5 @@
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,15 +8,34 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import api_router
 from app.core.config.settings import get_settings
+from app.core.logging.logger import configure_logging
+from app.jobs.cleanup import run_cleanup_job
 from app.core.observability.langsmith import configure_langsmith
 
 settings = get_settings()
+configure_logging(level=settings.log_level, json_format=bool(settings.log_json_format))
 configure_langsmith()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: startup and shutdown hooks."""
+    # Startup
+    if bool(getattr(settings, "cleanup_job_enabled", False)):
+        await run_cleanup_job(
+            wiki_dir=Path(settings.deploy_intel_wiki_dir),
+            max_log_age_days=int(getattr(settings, "cleanup_log_retention_days", 30)),
+            max_cache_age_days=int(getattr(settings, "cleanup_cache_retention_days", 60)),
+        )
+    yield
+    # Shutdown (if needed in future)
+
 
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     description="V1 Training Agent API (Python/FastAPI)",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

@@ -11,6 +11,7 @@ class RetrievalSearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     domain_context: str | None = Field(default=None)
     top_k: int = Field(default=6, ge=1, le=12)
+    orchestrator: str | None = Field(default=None)
 
 
 class MaterialInsightRequest(BaseModel):

@@ -11,6 +11,12 @@ import httpx
 
 from app.core.config.settings import get_settings
 from app.ingestion.chunking import chunk_text
+from app.ingestion.lifecycle import (
+    build_data_lifecycle_manifest,
+    ensure_data_lifecycle_dirs,
+    load_data_lifecycle_manifest,
+    save_data_lifecycle_manifest,
+)
 from app.ingestion.pii import approve_pii_file, build_pii_findings, detect_pii, get_approval_store
 from app.ingestion.pii import get_pending_pii_reviews as _get_pending_pii_reviews_impl
 from app.ingestion.readers import read_source_file
@@ -199,6 +205,7 @@ def run_ingestion(
     """
     _ = pdf_paths
     settings = get_settings()
+    ensure_data_lifecycle_dirs()
     source_dir = resolve_ingestion_source_dir()
     index_path = Path(settings.local_index_path)
     index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -430,6 +437,15 @@ def run_ingestion(
 
     # Persist updated manifest
     _save_manifest(new_manifest)
+
+    data_lifecycle_manifest = build_data_lifecycle_manifest(
+        source_dir=source_dir,
+        indexed_items_count=len(items),
+        file_results=file_results,
+        vector_backend_status=qdrant_sync,
+        existing_manifest=load_data_lifecycle_manifest(),
+    )
+    save_data_lifecycle_manifest(data_lifecycle_manifest)
 
     # Generate and save report using modular report builder
     report = build_report(source_dir, file_results, len(items), qdrant_sync)

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     log_level: str = "INFO"
+    log_json_format: bool = False  # NEW: Structured JSON logging
     vector_backend: str = "qdrant"
     llm_provider: str = "openai"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -23,14 +24,21 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: float = 45.0
     ollama_insight_timeout_seconds: float = 35.0
     ollama_question_timeout_seconds: float = 35.0
+    ollama_circuit_breaker_enabled: bool = True  # NEW: Circuit breaker for Ollama
+    ollama_circuit_breaker_failure_threshold: int = 3  # NEW: Failures before opening
+    ollama_circuit_breaker_recovery_seconds: int = 60  # NEW: Recovery timeout
     material_insight_skip_questions_on_timeout: bool = True
     material_insight_async_question_backfill_on_timeout: bool = True
-    material_insight_cache_ttl_seconds: int = 3600
+    material_insight_cache_ttl_seconds: int = 10800
     material_insight_cache_dir: str = str(PROJECT_ROOT / "data" / "indexes" / "material_insight_cache")
     material_insight_background_top_n: int = 3
     enable_query_rewrite: bool = True
     query_rewrite_max_chars: int = 220
     local_index_path: str = str(PROJECT_ROOT / "data" / "indexes" / "local_index.json")
+    data_raw_dir: str = str(PROJECT_ROOT / "data" / "raw")
+    data_processed_dir: str = str(PROJECT_ROOT / "data" / "processed")
+    data_indexes_dir: str = str(PROJECT_ROOT / "data" / "indexes")
+    data_traces_dir: str = str(PROJECT_ROOT / "data" / "traces")
     ingestion_source_dir: str = str(PROJECT_ROOT / "Resource")
     ingestion_report_path: str = str(PROJECT_ROOT / "data" / "indexes" / "ingestion_report.json")
     ingestion_ocr_enabled: bool = False
@@ -50,6 +58,9 @@ class Settings(BaseSettings):
     deploy_intel_generation_timeout_seconds: float = 180.0
     deploy_intel_retry_max: int = 2
     deploy_intel_retry_backoff_seconds: float = 1.5
+    deploy_intel_fast_mode: bool = False
+    deploy_intel_skip_contradictions: bool = False
+    deploy_intel_skip_lint: bool = False
     deploy_intel_enable_on_deploy: bool = True
     deploy_intel_blocking_on_deploy: bool = False
     deploy_intel_required_min_questions: int = 30
@@ -76,8 +87,12 @@ class Settings(BaseSettings):
     retrieval_lexical_acronym_max_len: int = 6
     retrieval_answer_timeout_seconds: float = 20.0
     retrieval_search_cache_enabled: bool = True
-    retrieval_search_cache_ttl_seconds: int = 300
+    retrieval_search_cache_ttl_seconds: int = 10800
     retrieval_search_cache_max_entries: int = 200
+    cache_multilevel_enabled: bool = True  # NEW: Enable L1/L2/L3 caching
+    cache_l1_max_size: int = 500  # NEW: In-memory cache size
+    cache_l1_ttl_seconds: int = 300  # NEW: L1 TTL (5 min)
+    cache_l2_ttl_seconds: int = 3600  # NEW: L2 TTL (1 hour)
     retrieval_wiki_first_enabled: bool = True
     retrieval_wiki_top_k: int = 4
     retrieval_wiki_min_score: float = 1.4
@@ -108,7 +123,7 @@ class Settings(BaseSettings):
     query_similarity_top_k: int = 5
     exact_cache_backend: str = "memory"
     redis_url: str = "redis://127.0.0.1:6379/0"
-    redis_exact_cache_ttl_seconds: int = 300
+    redis_exact_cache_ttl_seconds: int = 10800
     redis_exact_cache_prefix: str = "retrieval:exact"
     retrieval_llm_fallback_enabled: bool = True
     retrieval_llm_fallback_min_chars: int = 80
@@ -127,6 +142,10 @@ class Settings(BaseSettings):
     langsmith_endpoint: str = "https://api.smith.langchain.com"
     local_trace_log_enabled: bool = False
     local_trace_log_path: str = str(PROJECT_ROOT / "data" / "traces" / "trace_events.jsonl")
+    cleanup_job_enabled: bool = True  # NEW: Enable log rotation/cleanup
+    cleanup_log_rotation_max_mb: int = 10  # NEW: Rotate when >10MB
+    cleanup_log_retention_days: int = 30  # NEW: Delete logs >30 days old
+    cleanup_cache_retention_days: int = 60  # NEW: Delete cache >60 days old
 
     model_config = SettingsConfigDict(
         env_file=(PROJECT_ROOT / ".env",),

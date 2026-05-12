@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query
 
 from app.api.routes.admin_schemas import BenchmarkRunRequest, DeployIntelligenceRunRequest
+from app.core.observability.metrics import MetricsCollector
 from app.core.observability.langsmith import get_langsmith_status, get_langsmith_traces, get_local_trace_events
 from app.core.prompts.toon import prompt_catalog_summary, prompt_usage_summary
 from app.evaluation.service import get_evaluation_summary, get_last_benchmark_report, run_llm_benchmark
@@ -10,6 +11,7 @@ from app.jobs.deploy_intelligence import (
     trigger_deploy_intelligence_job,
 )
 from app.jobs.ingestion import get_ingestion_status
+from app.retrieval.service.cache import get_retrieval_cache_stats
 
 router = APIRouter()
 
@@ -76,3 +78,11 @@ def prompt_catalog() -> dict[str, object]:
 @router.get("/prompt-usage")
 def prompt_usage(limit: int = Query(default=2000, ge=50, le=10000)) -> dict[str, object]:
     return prompt_usage_summary(limit=limit)
+
+
+@router.get("/runtime-metrics")
+def runtime_metrics(limit: int = Query(default=50, ge=1, le=300)) -> dict[str, object]:
+    return {
+        "query_metrics": MetricsCollector.snapshot(limit=limit),
+        "retrieval_cache": get_retrieval_cache_stats(),
+    }

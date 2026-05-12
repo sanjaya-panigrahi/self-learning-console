@@ -1,4 +1,4 @@
-.PHONY: help build deploy deploy-trace-on deploy-trace-off reindex warm-cache warm-cache-blocking deploy-intelligence deploy-intelligence-blocking precompute-parallel watch-status clean
+.PHONY: help build deploy deploy-trace-on deploy-trace-off reindex warm-cache warm-cache-blocking deploy-intelligence deploy-intelligence-blocking precompute-parallel watch-status seed migrate healthcheck clean
 
 PROJECT_NAME := self-learning-console
 DOCKER_COMPOSE := docker compose --env-file .env -f infra/docker/docker-compose.yml
@@ -22,6 +22,9 @@ help:
 	@echo "  make deploy-intelligence Trigger full AI precompute + benchmark gate"
 	@echo "  make precompute-parallel Run reindex + warm-cache + deploy-intelligence"
 	@echo "  make watch-status       Watch warm-cache + deploy-intelligence status"
+	@echo "  make seed               Seed indexed content, cache, and deploy-intelligence artifacts"
+	@echo "  make migrate            Run blocking deploy-intelligence refresh"
+	@echo "  make healthcheck        Check /health and /ready endpoints"
 	@echo "  make clean    Stop containers and remove volumes + local cache"
 
 build:
@@ -134,6 +137,15 @@ deploy-trace-off:
 
 watch-status:
 	sh scripts/watch-status.sh http://127.0.0.1:$(API_PORT) 180
+
+seed:
+	sh scripts/seed.sh http://127.0.0.1:$(API_PORT)
+
+migrate:
+	sh scripts/migrate.sh http://127.0.0.1:$(API_PORT)
+
+healthcheck:
+	sh scripts/healthcheck.sh http://127.0.0.1:$(API_PORT)
 
 clean:
 	@TEMP_ENV_CREATED=0; \

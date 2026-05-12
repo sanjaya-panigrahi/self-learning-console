@@ -1,0 +1,17 @@
+{
+  "generated_at": 1778511805,
+  "status": "passed",
+  "gate_passed": true,
+  "summary": {
+    "documents": 33,
+    "knowledge_cards": 33,
+    "eval_cases": 0,
+    "entries_written": 0,
+    "repeat_hit_rate": 0.0,
+    "repeat_under_1000ms_rate": 0.0,
+    "runtime_seconds": 5501.38
+  },
+  "benchmark": {},
+  "clusters": {},
+  "errors": []
+}

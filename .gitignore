@@ -1,6 +1,23 @@
 # Local macOS artifacts
 .DS_Store
 
+# Python cache and artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
 # Local environment files
 .env
 .env.*
@@ -17,12 +34,29 @@ data/visual_previews/
 data/traces/
 data/*
 
+!data/
+!data/indexes/
+!data/raw/
+!data/raw/.gitkeep
+!data/processed/
+!data/processed/.gitkeep
+!data/indexes/lifecycle_manifest.json
+!data/indexes/.gitkeep
+
 doc/
 
 # Frontend generated artifacts
 ui/react-dashboard/node_modules/
 ui/react-dashboard/dist/
 
+# IDE artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-*.md*
-*.html*
+# Generated files (keep templates)
+# *.md* and *.html* rules removed — we want to preserve documentation
+*.md* 
+*.html* 

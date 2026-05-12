@@ -3,10 +3,12 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile
+      target: runtime
       args:
         NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-public.ecr.aws/docker/library/node:20-slim}
         PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}
     container_name: self-learning-console-api
+    restart: unless-stopped
     env_file:
       - ../../.env
     environment:
@@ -38,6 +40,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       QUERY_SIMILARITY_TRACKING_ENABLED: ${QUERY_SIMILARITY_TRACKING_ENABLED:-true}
       DEPLOY_INTEL_ENABLE_ON_DEPLOY: ${DEPLOY_INTEL_ENABLE_ON_DEPLOY:-true}
+      DEPLOY_INTEL_FAST_MODE: ${DEPLOY_INTEL_FAST_MODE:-true}
       DEPLOY_INTEL_MAX_DOCS: ${DEPLOY_INTEL_MAX_DOCS:-0}
       WARM_CACHE_MAX_DOCS: ${WARM_CACHE_MAX_DOCS:-0}
       DEPLOY_INTEL_BLOCKING_ON_DEPLOY: ${DEPLOY_INTEL_BLOCKING_ON_DEPLOY:-false}
@@ -62,9 +65,28 @@ services:
       retries: 5
       start_period: 20s
 
+  self-learning-console-tests:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+      target: test
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-public.ecr.aws/docker/library/node:20-slim}
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim}
+    container_name: self-learning-console-tests
+    profiles: ["test"]
+    environment:
+      APP_ENV: test
+      LLM_PROVIDER: ollama
+      VECTOR_BACKEND: memory
+      EXACT_CACHE_BACKEND: memory
+    volumes:
+      - ../../tests:/app/tests
+
   qdrant:
     image: qdrant/qdrant:v1.12.5
     container_name: self-learning-console-qdrant
+    restart: unless-stopped
     ports:
       - "6333:6333"
       - "6334:6334"

@@ -1,9 +1,13 @@
 """Local index loading utilities."""
 
 import json
+import logging
 from pathlib import Path
 
 from app.core.config.settings import get_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 def load_local_index() -> list[dict[str, str | list[float]]]:
@@ -18,6 +22,14 @@ def load_local_index() -> list[dict[str, str | list[float]]]:
     if not index_path.exists():
         return []
 
-    with index_path.open("r", encoding="utf-8") as file:
-        payload = json.load(file)
-    return payload.get("items", [])
+    try:
+        with index_path.open("r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
+        logger.warning("Failed to read local index '%s': %s", index_path, exc)
+        return []
+
+    items = payload.get("items", []) if isinstance(payload, dict) else []
+    if not isinstance(items, list):
+        return []
+    return items

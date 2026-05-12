@@ -43,6 +43,7 @@ def _parse_toon_catalog(text: str) -> dict[str, Any]:
     data: dict[str, Any] = {"toon_version": "1.0", "prompts": []}
     prompts: list[dict[str, Any]] = []
     current_prompt: dict[str, Any] | None = None
+    current_nested_key: str | None = None
 
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
@@ -61,6 +62,7 @@ def _parse_toon_catalog(text: str) -> dict[str, Any]:
             key, value = payload.split(":", 1)
             current_prompt = {key.strip(): _parse_toon_value(value)}
             prompts.append(current_prompt)
+            current_nested_key = None
             continue
 
         if ":" not in stripped:
@@ -70,14 +72,22 @@ def _parse_toon_catalog(text: str) -> dict[str, Any]:
         key = key.strip()
         parsed_value = _parse_toon_value(value)
 
-        if current_prompt is not None and line.startswith("    "):
+        if current_prompt is not None and line.startswith("      ") and current_nested_key:
+            nested_value = current_prompt.get(current_nested_key)
+            if not isinstance(nested_value, dict):
+                nested_value = {}
+                current_prompt[current_nested_key] = nested_value
+            nested_value[key] = parsed_value
+        elif current_prompt is not None and line.startswith("    "):
             current_prompt[key] = parsed_value
+            current_nested_key = key if value.strip() == "" else None
         elif line.startswith("  "):
             # Ignore nested non-prompt objects (optimization_scope etc.) for now.
             continue
         else:
             data[key] = parsed_value
             current_prompt = None
+            current_nested_key = None
 
     data["prompts"] = prompts
     return data

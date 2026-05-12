@@ -1,14 +1,24 @@
 import logging
+from typing import Any
 
 import httpx
 
 from app.api.schemas.chat import ChatResponse, Citation
 from app.core.config.settings import get_settings
 from app.core.observability.langsmith import traceable
+from app.core.observability.metrics import timeit_stage
 from app.core.prompts.toon import render_prompt
+from app.core.resilience import CircuitBreaker, CircuitBreakerOpenError, exponential_backoff_retry
 from app.retrieval.pipeline import RetrievedContext
 
 logger = logging.getLogger(__name__)
+
+_OLLAMA_BREAKER = CircuitBreaker(
+    name="ollama",
+    failure_threshold=3,
+    recovery_timeout_seconds=60,
+    expected_exception=httpx.HTTPError,
+)
 
 
 def _build_grounded_prompt(
@@ -16,7 +26,8 @@ def _build_grounded_prompt(
     contexts: list[RetrievedContext],
     domain_context: str | None = None,
 ) -> str:
-    context_lines = []
+    """Build prompt for grounded answer generation."""
+    context_lines: list[str] = []
     for idx, context in enumerate(contexts, start=1):
         context_lines.append(
             f"[{idx}] source={context['source']} chunk={context['chunk_id']}\\n{context['text']}"
@@ -35,6 +46,13 @@ def _build_grounded_prompt(
     return prompt or ""
 
 
+@exponential_backoff_retry(
+    max_retries=2,
+    initial_delay_ms=100,
+    max_delay_ms=1000,
+    exception_types=(httpx.TimeoutException, TimeoutError),
+)
+@timeit_stage("generate")
 @traceable(
     name="generation.call_ollama",
     run_type="llm",
@@ -42,17 +60,32 @@ def _build_grounded_prompt(
     metadata={"component": "generation", "provider": "ollama"},
 )
 def _call_ollama(prompt: str) -> str:
+    """
+    Call Ollama for generation with retry logic.
+    
+    Raises:
+        httpx.HTTPError: If request fails (after retries)
+        CircuitBreakerOpenError: If circuit breaker is open (too many failures)
+    """
     settings = get_settings()
-    payload = {
+    payload: dict[str, Any] = {
         "model": settings.ollama_model,
         "prompt": prompt,
         "stream": False,
     }
-    with httpx.Client(timeout=settings.ollama_timeout_seconds) as client:
-        response = client.post(f"{settings.ollama_base_url}/api/generate", json=payload)
-        response.raise_for_status()
-        data = response.json()
-    return data.get("response", "").strip()
+    
+    # Apply circuit breaker
+    def _make_request() -> str:
+        with httpx.Client(timeout=settings.ollama_timeout_seconds) as client:
+            response = client.post(
+                f"{settings.ollama_base_url}/api/generate",
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+        return data.get("response", "").strip()
+    
+    return _OLLAMA_BREAKER.call(_make_request)
 
 
 @traceable(
@@ -66,7 +99,20 @@ def generate_answer(
     contexts: list[RetrievedContext],
     domain_context: str | None = None,
 ) -> ChatResponse:
-    """Generate grounded answers, using Ollama when configured."""
+    """
+    Generate grounded answers with graceful degradation.
+    
+    If Ollama is unavailable (circuit breaker open or timeout),
+    returns top search results without synthesis.
+    
+    Args:
+        query: User question
+        contexts: Retrieved context chunks
+        domain_context: Optional domain-specific context
+    
+    Returns:
+        ChatResponse with answer + citations
+    """
     citations = [Citation(source=c["source"], chunk_id=c["chunk_id"]) for c in contexts]
     settings = get_settings()
 
@@ -76,9 +122,35 @@ def generate_answer(
             answer = _call_ollama(prompt)
             if answer:
                 return ChatResponse(answer=answer, citations=citations, confidence=0.75)
-        except httpx.HTTPError as exc:
+        except CircuitBreakerOpenError as exc:
+            logger.warning(
+                "Ollama circuit breaker OPEN (too many failures), returning search results: %s",
+                exc,
+            )
+            # Graceful degradation: return top search result
+            if contexts:
+                fallback_answer = (
+                    f"(LLM unavailable, showing top search result)\n\n{contexts[0]['text']}"
+                )
+                return ChatResponse(
+                    answer=fallback_answer,
+                    citations=citations,
+                    confidence=0.5,
+                )
+        except (httpx.HTTPError, httpx.TimeoutException, TimeoutError) as exc:
             logger.warning("Ollama request failed: %s", exc)
+            # Graceful degradation: return top search result
+            if contexts:
+                fallback_answer = (
+                    f"(LLM timeout, showing top search result)\n\n{contexts[0]['text']}"
+                )
+                return ChatResponse(
+                    answer=fallback_answer,
+                    citations=citations,
+                    confidence=0.5,
+                )
 
+        # Fallback if no contexts
         return ChatResponse(
             answer=(
                 "I could not reach the local Ollama model. "
@@ -88,5 +160,6 @@ def generate_answer(
             confidence=0.2,
         )
 
+    # Default fallback (non-Ollama provider)
     answer = f"This is a starter response for: {query}"
     return ChatResponse(answer=answer, citations=citations, confidence=0.5)

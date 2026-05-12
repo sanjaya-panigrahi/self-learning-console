@@ -1,5 +1,6 @@
 """In-memory cache for retrieval search responses with TTL support."""
 
+from collections import OrderedDict
 import threading
 import time
 import json
@@ -14,7 +15,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 _RETRIEVAL_SEARCH_CACHE_VERSION = "v1"
 _RETRIEVAL_SEARCH_CACHE_LOCK = threading.Lock()
-_RETRIEVAL_SEARCH_CACHE: dict[str, dict[str, Any]] = {}
+_RETRIEVAL_SEARCH_CACHE: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
 _REDIS_CLIENT: Any = None
 
 
@@ -80,7 +81,15 @@ def get_cached_retrieval_search(
     if not bool(getattr(settings, "retrieval_search_cache_enabled", True)):
         return None
 
-    ttl = max(int(getattr(settings, "retrieval_search_cache_ttl_seconds", 300)), 15)
+    multilevel_enabled = bool(getattr(settings, "cache_multilevel_enabled", True))
+    ttl = max(
+        int(
+            getattr(settings, "cache_l1_ttl_seconds", 300)
+            if multilevel_enabled
+            else getattr(settings, "retrieval_search_cache_ttl_seconds", 300)
+        ),
+        15,
+    )
     key = cache_key(query, domain_context, top_k, orchestrator)
     now = time.time()
 
@@ -107,6 +116,7 @@ def get_cached_retrieval_search(
             return None
 
         payload = dict(cached.get("payload", {}))
+        _RETRIEVAL_SEARCH_CACHE.move_to_end(key)
 
     payload["cached"] = True
     payload["cache_age_seconds"] = int(now - cached_at)
@@ -125,19 +135,34 @@ def set_cached_retrieval_search(
     if not bool(getattr(settings, "retrieval_search_cache_enabled", True)):
         return
 
-    max_entries = max(int(getattr(settings, "retrieval_search_cache_max_entries", 200)), 20)
+    multilevel_enabled = bool(getattr(settings, "cache_multilevel_enabled", True))
+    max_entries = max(
+        int(
+            getattr(settings, "cache_l1_max_size", 500)
+            if multilevel_enabled
+            else getattr(settings, "retrieval_search_cache_max_entries", 200)
+        ),
+        20,
+    )
     key = cache_key(query, domain_context, top_k, orchestrator)
 
     client = _get_redis_client()
     if client is not None:
-        ttl = max(int(getattr(settings, "redis_exact_cache_ttl_seconds", 300)), 15)
+        ttl = max(
+            int(
+                getattr(settings, "cache_l2_ttl_seconds", 3600)
+                if multilevel_enabled
+                else getattr(settings, "redis_exact_cache_ttl_seconds", 300)
+            ),
+            15,
+        )
         try:
             client.setex(_redis_cache_key(key), ttl, json.dumps(dict(payload)))
-            return
         except Exception:
             pass
 
     with _RETRIEVAL_SEARCH_CACHE_LOCK:
+        _RETRIEVAL_SEARCH_CACHE.pop(key, None)
         _RETRIEVAL_SEARCH_CACHE[key] = {
             "cached_at": time.time(),
             "payload": dict(payload),
@@ -147,9 +172,27 @@ def set_cached_retrieval_search(
         if overflow <= 0:
             return
 
-        oldest_items = sorted(
-            _RETRIEVAL_SEARCH_CACHE.items(),
-            key=lambda item: float(item[1].get("cached_at", 0.0)),
-        )
-        for old_key, _ in oldest_items[:overflow]:
-            _RETRIEVAL_SEARCH_CACHE.pop(old_key, None)
+        for _ in range(overflow):
+            _RETRIEVAL_SEARCH_CACHE.popitem(last=False)
+
+
+def get_retrieval_cache_stats() -> dict[str, Any]:
+    """Return lightweight cache stats for observability endpoints."""
+    settings = get_settings()
+    with _RETRIEVAL_SEARCH_CACHE_LOCK:
+        in_memory_entries = len(_RETRIEVAL_SEARCH_CACHE)
+
+    multilevel_enabled = bool(getattr(settings, "cache_multilevel_enabled", True))
+    return {
+        "cache_enabled": bool(getattr(settings, "retrieval_search_cache_enabled", True)),
+        "cache_backend": str(getattr(settings, "exact_cache_backend", "memory")),
+        "multilevel_enabled": multilevel_enabled,
+        "l1_ttl_seconds": int(getattr(settings, "cache_l1_ttl_seconds", 300)),
+        "l2_ttl_seconds": int(getattr(settings, "cache_l2_ttl_seconds", 3600)),
+        "max_entries": int(
+            getattr(settings, "cache_l1_max_size", 500)
+            if multilevel_enabled
+            else getattr(settings, "retrieval_search_cache_max_entries", 200)
+        ),
+        "in_memory_entries": in_memory_entries,
+    }

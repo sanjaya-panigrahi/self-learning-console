@@ -9,7 +9,9 @@ Sub-modules:
   insight/llm.py        - LLM-based insight and question generation via Ollama
 """
 
+import logging
 import threading
+import time
 from typing import Any
 
 from app.core.config.settings import get_settings
@@ -40,6 +42,8 @@ __all__ = [
     "InsightProgressCallback",
 ]
 
+logger = logging.getLogger(__name__)
+
 
 _QUESTION_BACKFILL_LOCK = threading.Lock()
 _ACTIVE_QUESTION_BACKFILLS: set[str] = set()
@@ -58,6 +62,13 @@ def _start_async_question_backfill(
             return
         _ACTIVE_QUESTION_BACKFILLS.add(backfill_key)
 
+    seeded_payload = dict(base_result)
+    seeded_payload["question_source"] = str(seeded_payload.get("question_source") or "question_model_skipped_timeout")
+    seeded_payload["question_model"] = question_model
+    seeded_payload["question_backfill_status"] = "running"
+    seeded_payload["question_backfill_updated_at"] = int(time.time())
+    set_cached_material_insight(source, domain_context, seeded_payload)
+
     def _run() -> None:
         try:
             questions = generate_question_bank_with_ollama(
@@ -68,16 +79,30 @@ def _start_async_question_backfill(
                 strict_model_only=True,
                 callback=None,
             )
-            if not questions:
-                return
-
             cached_payload = get_cached_material_insight(source, domain_context)
             payload = dict(cached_payload or base_result)
             payload.pop("cached", None)
             payload.pop("cache_age_seconds", None)
+            payload["question_backfill_updated_at"] = int(time.time())
+
+            if not questions:
+                payload["question_backfill_status"] = "failed_no_questions"
+                set_cached_material_insight(source, domain_context, payload)
+                return
+
             payload["suggested_questions"] = questions
             payload["question_source"] = "question_model_async_backfill"
             payload["question_model"] = question_model
+            payload["question_backfill_status"] = "completed"
+            set_cached_material_insight(source, domain_context, payload)
+        except Exception:
+            logger.exception("Async question backfill failed for source=%s", source)
+            cached_payload = get_cached_material_insight(source, domain_context)
+            payload = dict(cached_payload or base_result)
+            payload.pop("cached", None)
+            payload.pop("cache_age_seconds", None)
+            payload["question_backfill_status"] = "failed_exception"
+            payload["question_backfill_updated_at"] = int(time.time())
             set_cached_material_insight(source, domain_context, payload)
         finally:
             with _QUESTION_BACKFILL_LOCK:
@@ -159,6 +184,8 @@ def _compute_material_insight(
             {"source": source, "reason": "insight_timeout_exhausted", "question_model": question_model},
         )
         if async_backfill_on_timeout:
+            result["question_backfill_status"] = "running"
+            result["question_backfill_updated_at"] = int(time.time())
             _start_async_question_backfill(
                 source=source,
                 domain_context=domain_context,

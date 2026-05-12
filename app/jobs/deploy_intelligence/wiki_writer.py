@@ -27,6 +27,7 @@ from typing import Any
 import hashlib
 import json
 import os
+import tempfile
 
 from app.core.config.settings import get_settings
 
@@ -66,6 +67,14 @@ def _slug(name: str) -> str:
 
 def _now_str() -> str:
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding=encoding, dir=path.parent, delete=False, suffix=".tmp") as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    os.replace(tmp_path, path)
 
 
 def _bullet_list(items: list[str]) -> str:
@@ -343,14 +352,37 @@ def write_source_page(card: dict[str, Any], sources_dir: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def _build_entity_map(cards: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Map each entity name → list of cards in which it appears."""
-    entity_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    """Map each entity name → list of cards in which it appears.
+
+    Variants of the same entity that differ only in case, hyphens, or underscores
+    are merged under the most frequently occurring raw form (canonical name).
+    """
+    def _norm(name: str) -> str:
+        return re.sub(r"[-_]", " ", name.lower()).strip()
+
+    # norm_key → { "name_counts": {raw: count}, "cards": [card, ...] }
+    grouped: dict[str, dict] = {}
     for card in cards:
+        seen_norms: set[str] = set()
         for e in card.get("entities", []):
             name = str(e).strip()
-            if name:
-                entity_map[name].append(card)
-    return dict(entity_map)
+            if not name:
+                continue
+            key = _norm(name)
+            if key in seen_norms:
+                continue  # avoid counting the same card twice for the same entity
+            seen_norms.add(key)
+            if key not in grouped:
+                grouped[key] = {"name_counts": defaultdict(int), "cards": []}
+            grouped[key]["name_counts"][name] += 1
+            grouped[key]["cards"].append(card)
+
+    entity_map: dict[str, list[dict[str, Any]]] = {}
+    for key, data in grouped.items():
+        canonical = max(data["name_counts"], key=lambda n: data["name_counts"][n])
+        entity_map[canonical] = data["cards"]
+
+    return entity_map
 
 
 def write_entity_pages(
@@ -392,10 +424,19 @@ def write_entity_pages(
 
         # Collect all summaries mentioning this entity for context
         excerpts: list[str] = []
+        entity_normalized = re.sub(r"[-_]", " ", entity.lower()).strip()
         for c in entity_cards:
             summary = str(c.get("summary", "")).strip()
-            if entity.lower() in summary.lower() and summary:
-                excerpts.append(f"> *{str(c.get('title', 'Unknown'))}* — {summary[:200].strip()}…")
+            summary_lower = summary.lower()
+            in_summary = entity_normalized in summary_lower
+            if not in_summary:
+                # also check individual key_points for a mention
+                for kp in c.get("key_points", []):
+                    if entity_normalized in str(kp).lower():
+                        in_summary = True
+                        break
+            if in_summary and summary:
+                excerpts.append(f"> *{str(c.get('title', 'Unknown'))}* — {summary[:300].strip()}…")
 
         if excerpts:
             lines += [
@@ -561,7 +602,7 @@ def _load_manifest(wiki_dir: Path) -> dict[str, str]:
 
 def _save_manifest(wiki_dir: Path, manifest: dict[str, str]) -> None:
     wiki_dir.mkdir(parents=True, exist_ok=True)
-    _manifest_path(wiki_dir).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    _atomic_write_text(_manifest_path(wiki_dir), json.dumps(manifest, indent=2))
 
 
 # ---------------------------------------------------------------------------
@@ -590,7 +631,7 @@ def _load_review_state(wiki_dir: Path) -> dict[str, Any]:
 
 def _save_review_state(wiki_dir: Path, state: dict[str, Any]) -> None:
     wiki_dir.mkdir(parents=True, exist_ok=True)
-    _review_state_path(wiki_dir).write_text(json.dumps(state, indent=2), encoding="utf-8")
+    _atomic_write_text(_review_state_path(wiki_dir), json.dumps(state, indent=2))
 
 
 def set_page_review_status(
@@ -705,7 +746,7 @@ def write_impact_report(
     }
 
     wiki_dir.mkdir(parents=True, exist_ok=True)
-    impact_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    _atomic_write_text(impact_path, json.dumps(payload, indent=2))
     append_wiki_log(
         f"Impact report updated — {len(changed_sources)} changed, "
         f"{len(deleted_sources)} deleted, {len(affected_entities)} entity pages, "

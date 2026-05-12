@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import quote
 
 from app.core.config.settings import get_settings
+from app.core.observability.metrics import MetricsCollector
 from app.core.observability.langsmith import traceable
 from app.ingestion.pipeline import get_last_ingestion_report, resolve_ingestion_source_dir
 from app.retrieval.index import load_local_index
@@ -100,6 +101,7 @@ from app.retrieval.service.visuals import (
 from app.retrieval.service.visuals import (
     resolve_visual_reference_source as resolve_visual_source,
 )
+from app.agents import build_retrieval_plan, choose_orchestrator, select_final_answer_payload
 
 logger = logging.getLogger(__name__)
 
@@ -568,299 +570,314 @@ def search_retrieval_material(
     query: str,
     domain_context: str | None = None,
     top_k: int = 6,
+    orchestrator: str | None = None,
 ) -> RetrievalSearchResponse:
     settings = get_settings()
-    orchestrator_name = str(getattr(settings, "retrieval_orchestrator", "custom")).strip().lower()
+    orchestrator_name = choose_orchestrator(
+        default_orchestrator=str(getattr(settings, "retrieval_orchestrator", "custom")).strip().lower(),
+        requested_orchestrator=orchestrator,
+    )
     query_clean = " ".join(query.split()).strip()
+    query_id = MetricsCollector.create_query(query_clean)
 
     try:
-        record_query_signature(query=query_clean, domain_context=domain_context)
-    except Exception:
-        pass
+        try:
+            record_query_signature(query=query_clean, domain_context=domain_context)
+        except Exception as exc:
+            logger.debug("record_query_signature failed (non-critical): %s", exc)
 
-    cached_response = get_cached_retrieval_search(
-        query=query_clean,
-        domain_context=domain_context,
-        top_k=top_k,
-        orchestrator=orchestrator_name,
-    )
-    if cached_response is not None and _cached_wiki_answer_is_valid(query_clean, cached_response):
-        cached_response["semantic_cache_hit"] = False
-        cached_response["semantic_cache_score"] = 1.0
-        cached_response["semantic_cache_kind"] = "exact"
-        cached_response["semantic_cache_source"] = "retrieval-search-cache"
-        if bool(getattr(settings, "semantic_cache_enabled", True)) and bool(
-            getattr(settings, "semantic_cache_learn_from_runtime", True)
-        ):
+        cached_response = get_cached_retrieval_search(
+            query=query_clean,
+            domain_context=domain_context,
+            top_k=top_k,
+            orchestrator=orchestrator_name,
+        )
+        if cached_response is not None and _cached_wiki_answer_is_valid(query_clean, cached_response):
+            MetricsCollector.record_cache_hit(query_id, True, "L1/L2")
+            cached_response["semantic_cache_hit"] = False
+            cached_response["semantic_cache_score"] = 1.0
+            cached_response["semantic_cache_kind"] = "exact"
+            cached_response["semantic_cache_source"] = "retrieval-search-cache"
+            if bool(getattr(settings, "semantic_cache_enabled", True)) and bool(
+                getattr(settings, "semantic_cache_learn_from_runtime", True)
+            ):
+                try:
+                    upsert_semantic_cache_entry(
+                        query=query_clean,
+                        domain_context=domain_context,
+                        response_payload=cached_response,
+                        source="runtime-search-exact-cache",
+                        generated_by_model=str(cached_response.get("answer_model", "")),
+                        kind="runtime",
+                        score=float(cached_response.get("answer_confidence", 0.0) or 0.0),
+                    )
+                except Exception as exc:
+                    logger.debug("semantic cache upsert (exact-cache path) failed (non-critical): %s", exc)
+            return cached_response
+
+        MetricsCollector.record_cache_hit(query_id, False)
+
+        semantic_hit = None
+        if bool(getattr(settings, "semantic_cache_enabled", True)):
+            try:
+                semantic_hit = find_semantic_cache_hit(query=query_clean, domain_context=domain_context)
+            except Exception as e:
+                logger.debug(f"Semantic cache lookup error (continuing): {e}")
+                semantic_hit = None
+
+            if semantic_hit is None:
+                try:
+                    similar_query_match = find_similar_query(query=query_clean, domain_context=domain_context)
+                except Exception as exc:
+                    logger.debug("similar query lookup failed (non-critical): %s", exc)
+                    similar_query_match = None
+                if similar_query_match is not None:
+                    candidate_query = str(similar_query_match.get("query_norm") or "").strip()
+                    if candidate_query:
+                        try:
+                            semantic_hit = find_semantic_cache_hit(query=candidate_query, domain_context=domain_context)
+                        except Exception as exc:
+                            logger.debug("semantic cache lookup (similar-query path) failed (non-critical): %s", exc)
+                            semantic_hit = None
+                        if semantic_hit is not None:
+                            semantic_hit = dict(semantic_hit)
+                            semantic_hit["source"] = f"{semantic_hit.get('source', 'semantic-cache')}|similar-query"
+                            semantic_hit["similar_query"] = {
+                                "query": str(similar_query_match.get("query", "")),
+                                "query_norm": candidate_query,
+                                "score": float(similar_query_match.get("score", 0.0) or 0.0),
+                            }
+    
+        if semantic_hit is not None:
+            semantic_payload = dict(semantic_hit.get("response", {}))
+            if not _cached_wiki_answer_is_valid(query_clean, semantic_payload):
+                semantic_hit = None
+
+        if semantic_hit is not None:
+            MetricsCollector.record_cache_hit(query_id, True, "L3")
+            semantic_payload = dict(semantic_hit.get("response", {}))
+            semantic_payload["query"] = query
+            semantic_payload["retrieval_query"] = semantic_payload.get("retrieval_query") or query_clean
+            semantic_payload["orchestrator"] = orchestrator_name
+            semantic_payload["cached"] = True
+            semantic_payload["cache_age_seconds"] = max(int(time.time()) - int(semantic_hit.get("created_at") or time.time()), 0)
+            semantic_payload["semantic_cache_hit"] = True
+            semantic_payload["semantic_cache_score"] = float(semantic_hit.get("score", 0.0) or 0.0)
+            semantic_payload["semantic_cache_kind"] = str(semantic_hit.get("kind", "runtime"))
+            semantic_payload["semantic_cache_source"] = str(semantic_hit.get("source", "semantic-cache"))
+            similar_query_info = semantic_hit.get("similar_query")
+            if isinstance(similar_query_info, dict):
+                semantic_payload["similar_query"] = dict(similar_query_info)
+            return semantic_payload
+
+        normalized_query = normalize_training_question_query(query_clean)
+        local_normalized = normalized_query.strip().lower() != query_clean.strip().lower()
+
+        entity_style_query = is_entity_style_query(query_clean)
+        rewrite_enabled = bool(getattr(settings, "enable_query_rewrite", True))
+
+        plan = build_retrieval_plan(
+            query_clean=query_clean,
+            normalized_query=normalized_query,
+            rewrite_enabled=rewrite_enabled,
+            rewrite_func=rewrite_query_for_retrieval,
+            domain_context=domain_context,
+        )
+        retrieval_query = plan["retrieval_query"]
+
+        wiki_contexts: list[dict[str, str]] = []
+        if bool(getattr(settings, "retrieval_wiki_first_enabled", True)):
+            wiki_dir = Path(getattr(settings, "deploy_intel_wiki_dir", "") or "data/wiki")
+            wiki_top_k = int(getattr(settings, "retrieval_wiki_top_k", max(top_k, 4)) or max(top_k, 4))
+            wiki_contexts = _load_wiki_contexts(query=query_clean, wiki_dir=wiki_dir, top_k=wiki_top_k)
+            min_wiki_score = float(getattr(settings, "retrieval_wiki_min_score", 1.4) or 1.4)
+            wiki_answer_contexts = [context for context in wiki_contexts if _is_wiki_answer_context(context)]
+            if wiki_answer_contexts:
+                best_wiki_score = _keyword_relevance_score(
+                    query=query_clean,
+                    source=wiki_answer_contexts[0]["source"],
+                    text=wiki_answer_contexts[0]["text"],
+                ) + _content_quality_score(wiki_answer_contexts[0]["text"])
+                if best_wiki_score >= min_wiki_score:
+                    wiki_response = _wiki_response(
+                        query=query,
+                        retrieval_query=retrieval_query,
+                        orchestrator_name=orchestrator_name,
+                        contexts=wiki_answer_contexts[:top_k],
+                        domain_context=domain_context,
+                    )
+                    set_cached_retrieval_search(
+                        query=query_clean,
+                        domain_context=domain_context,
+                        top_k=top_k,
+                        orchestrator=orchestrator_name,
+                        payload=wiki_response,
+                    )
+                    if bool(getattr(settings, "semantic_cache_learn_from_runtime", True)):
+                        try:
+                            upsert_semantic_cache_entry(
+                                query=query_clean,
+                                domain_context=domain_context,
+                                response_payload=wiki_response,
+                                source="runtime-search-wiki",
+                                generated_by_model=str(wiki_response.get("answer_model", "")),
+                                kind="runtime",
+                                score=float(wiki_response.get("answer_confidence", 0.0) or 0.0),
+                            )
+                        except Exception as exc:
+                            logger.debug("semantic cache upsert (wiki path) failed (non-critical): %s", exc)
+                    return wiki_response
+
+        expanded_top_k = max(top_k * 8, 40)
+        base_query = normalized_query if local_normalized else query_clean
+        variants = query_variants(base_query, retrieval_query)
+
+        original_contexts: list[dict[str, str]] = []
+        rewritten_contexts: list[dict[str, str]] = []
+        preferred_sources: list[str] = []
+        for index, variant in enumerate(variants):
+            if orchestrator_name == "llamaindex":
+                contexts = retrieve_context_with_llamaindex(variant, top_k=expanded_top_k)
+                if not contexts:
+                    contexts = retrieve_context(variant, top_k=expanded_top_k)
+            else:
+                contexts = retrieve_context(variant, top_k=expanded_top_k)
+            if index == 0:
+                original_contexts = contexts
+            else:
+                rewritten_contexts.extend(contexts)
+
+        acronym_candidates = _extract_acronym_candidates(query_clean)
+        if entity_style_query and acronym_candidates:
+            for acronym in acronym_candidates[:2]:
+                _, sources = _find_acronym_expansion_in_index(acronym)
+                for source in sources:
+                    if source not in preferred_sources:
+                        preferred_sources.append(source)
+            if preferred_sources:
+                boosted_contexts = _preferred_source_contexts(query=query_clean, sources=preferred_sources, limit=max(top_k, 2))
+                if boosted_contexts:
+                    original_contexts = boosted_contexts + original_contexts
+
+        contexts = _merge_and_rank_contexts(
+            query=query,
+            original_contexts=original_contexts,
+            rewritten_contexts=rewritten_contexts,
+            top_k=top_k,
+        )
+        if entity_style_query and preferred_sources:
+            contexts = _promote_preferred_sources(contexts=contexts, preferred_sources=preferred_sources, top_k=top_k)
+
+        llm_payload = _synthesize_retrieval_answer(
+            query=query_clean,
+            contexts=contexts,
+            domain_context=domain_context,
+        )
+
+        retrieval_answer, retrieval_confidence = _fallback_retrieval_answer(query=query_clean, contexts=contexts)
+        retrieval_payload = {
+            "answer": retrieval_answer,
+            "answer_confidence": retrieval_confidence,
+            "answer_confidence_source": "retrieval-rule-based",
+            "answer_model": "retrieval-based",
+            "answer_path": "retrieval-rule-based",
+        }
+
+        llm_available = llm_payload.get("answer_path") == "llm"
+        llm_answer = str(llm_payload.get("answer", "")).strip() if llm_available else ""
+
+        llm_answer_insufficient_flag = (
+            not llm_available or _is_llm_answer_insufficient(llm_answer, query_clean)
+        )
+        final_answer_payload, fallback_reason = select_final_answer_payload(
+            llm_payload=llm_payload,
+            retrieval_payload=retrieval_payload,
+            llm_answer_insufficient=llm_answer_insufficient_flag,
+        )
+
+        citations: list[RetrievalCitation] = [
+            {
+                "source": context["source"],
+                "chunk_id": context["chunk_id"],
+            }
+            for context in contexts[:4]
+        ]
+        visual_references = _build_visual_references([context["source"] for context in contexts])
+        results: list[RetrievalResultItem] = []
+        for context in contexts:
+            page_image: str = ""
+            if context.get("source", "").endswith(".pdf"):
+                img_path = render_chunk_page_image(
+                    source=str(context["source"]),
+                    chunk_text=str(context.get("text", "")),
+                )
+                if img_path:
+                    page_image = f"/visual-previews/{quote(img_path.name)}"
+            results.append(
+                {
+                    "source": context["source"],
+                    "chunk_id": context["chunk_id"],
+                    "excerpt": _trim_excerpt(context["text"], limit=320),
+                    "page_image_url": page_image,
+                }
+            )
+
+        response: RetrievalSearchResponse = {
+            "query": query,
+            "retrieval_query": retrieval_query,
+            "orchestrator": orchestrator_name,
+            "answer": final_answer_payload["answer"],
+            "answer_confidence": final_answer_payload["answer_confidence"],
+            "answer_confidence_source": final_answer_payload.get("answer_confidence_source", "unknown"),
+            "answer_model": final_answer_payload["answer_model"],
+            "answer_path": final_answer_payload.get("answer_path", "unknown"),
+            "llm_answer": llm_answer,
+            "llm_answer_confidence": llm_payload.get("answer_confidence", 0.0) if llm_available else 0.0,
+            "llm_answer_confidence_source": llm_payload.get("answer_confidence_source", "none") if llm_available else "none",
+            "llm_answer_model": llm_payload.get("answer_model", "") if llm_available else "",
+            "retrieval_answer": retrieval_payload["answer"],
+            "retrieval_answer_confidence": retrieval_payload["answer_confidence"],
+            "retrieval_answer_confidence_source": retrieval_payload.get("answer_confidence_source", "retrieval-rule-based"),
+            "retrieval_answer_model": retrieval_payload["answer_model"],
+            "fallback_used": bool(fallback_reason),
+            "fallback_reason": fallback_reason,
+            "citations": citations,
+            "visual_references": visual_references,
+            "result_count": len(contexts),
+            "results": results,
+            "cached": False,
+            "cache_age_seconds": 0,
+            "semantic_cache_hit": False,
+            "semantic_cache_score": 0.0,
+            "semantic_cache_kind": "none",
+            "semantic_cache_source": "none",
+        }
+
+        set_cached_retrieval_search(
+            query=query_clean,
+            domain_context=domain_context,
+            top_k=top_k,
+            orchestrator=orchestrator_name,
+            payload=response,
+        )
+
+        if bool(getattr(settings, "semantic_cache_learn_from_runtime", True)):
             try:
                 upsert_semantic_cache_entry(
                     query=query_clean,
                     domain_context=domain_context,
-                    response_payload=cached_response,
-                    source="runtime-search-exact-cache",
-                    generated_by_model=str(cached_response.get("answer_model", "")),
+                    response_payload=response,
+                    source="runtime-search",
+                    generated_by_model=str(final_answer_payload.get("answer_model", "")),
                     kind="runtime",
-                    score=float(cached_response.get("answer_confidence", 0.0) or 0.0),
+                    score=float(final_answer_payload.get("answer_confidence", 0.0) or 0.0),
                 )
-            except Exception:
-                pass
-        return cached_response
+            except Exception as exc:
+                logger.debug("semantic cache upsert (final response) failed (non-critical): %s", exc)
 
-    semantic_hit = None
-    if bool(getattr(settings, "semantic_cache_enabled", True)):
-        try:
-            semantic_hit = find_semantic_cache_hit(query=query_clean, domain_context=domain_context)
-        except Exception as e:
-            logger.debug(f"Semantic cache lookup error (continuing): {e}")
-            semantic_hit = None
-
-        if semantic_hit is None:
-            try:
-                similar_query_match = find_similar_query(query=query_clean, domain_context=domain_context)
-            except Exception:
-                similar_query_match = None
-            if similar_query_match is not None:
-                candidate_query = str(similar_query_match.get("query_norm") or "").strip()
-                if candidate_query:
-                    try:
-                        semantic_hit = find_semantic_cache_hit(query=candidate_query, domain_context=domain_context)
-                    except Exception:
-                        semantic_hit = None
-                    if semantic_hit is not None:
-                        semantic_hit = dict(semantic_hit)
-                        semantic_hit["source"] = f"{semantic_hit.get('source', 'semantic-cache')}|similar-query"
-                        semantic_hit["similar_query"] = {
-                            "query": str(similar_query_match.get("query", "")),
-                            "query_norm": candidate_query,
-                            "score": float(similar_query_match.get("score", 0.0) or 0.0),
-                        }
-    
-    if semantic_hit is not None:
-        semantic_payload = dict(semantic_hit.get("response", {}))
-        if not _cached_wiki_answer_is_valid(query_clean, semantic_payload):
-            semantic_hit = None
-
-    if semantic_hit is not None:
-        semantic_payload = dict(semantic_hit.get("response", {}))
-        semantic_payload["query"] = query
-        semantic_payload["retrieval_query"] = semantic_payload.get("retrieval_query") or query_clean
-        semantic_payload["orchestrator"] = orchestrator_name
-        semantic_payload["cached"] = True
-        semantic_payload["cache_age_seconds"] = max(int(time.time()) - int(semantic_hit.get("created_at") or time.time()), 0)
-        semantic_payload["semantic_cache_hit"] = True
-        semantic_payload["semantic_cache_score"] = float(semantic_hit.get("score", 0.0) or 0.0)
-        semantic_payload["semantic_cache_kind"] = str(semantic_hit.get("kind", "runtime"))
-        semantic_payload["semantic_cache_source"] = str(semantic_hit.get("source", "semantic-cache"))
-        similar_query_info = semantic_hit.get("similar_query")
-        if isinstance(similar_query_info, dict):
-            semantic_payload["similar_query"] = dict(similar_query_info)
-        return semantic_payload
-
-    normalized_query = normalize_training_question_query(query_clean)
-    local_normalized = normalized_query.strip().lower() != query_clean.strip().lower()
-
-    entity_style_query = is_entity_style_query(query_clean)
-    rewrite_enabled = bool(getattr(settings, "enable_query_rewrite", True))
-
-    if entity_style_query:
-        retrieval_query = query_clean
-    elif local_normalized:
-        retrieval_query = normalized_query
-    elif not rewrite_enabled:
-        retrieval_query = query_clean
-    else:
-        retrieval_query = rewrite_query_for_retrieval(query_clean, domain_context=domain_context)
-
-    wiki_contexts: list[dict[str, str]] = []
-    if bool(getattr(settings, "retrieval_wiki_first_enabled", True)):
-        wiki_dir = Path(getattr(settings, "deploy_intel_wiki_dir", "") or "data/wiki")
-        wiki_top_k = int(getattr(settings, "retrieval_wiki_top_k", max(top_k, 4)) or max(top_k, 4))
-        wiki_contexts = _load_wiki_contexts(query=query_clean, wiki_dir=wiki_dir, top_k=wiki_top_k)
-        min_wiki_score = float(getattr(settings, "retrieval_wiki_min_score", 1.4) or 1.4)
-        wiki_answer_contexts = [context for context in wiki_contexts if _is_wiki_answer_context(context)]
-        if wiki_answer_contexts:
-            best_wiki_score = _keyword_relevance_score(
-                query=query_clean,
-                source=wiki_answer_contexts[0]["source"],
-                text=wiki_answer_contexts[0]["text"],
-            ) + _content_quality_score(wiki_answer_contexts[0]["text"])
-            if best_wiki_score >= min_wiki_score:
-                wiki_response = _wiki_response(
-                    query=query,
-                    retrieval_query=retrieval_query,
-                    orchestrator_name=orchestrator_name,
-                    contexts=wiki_answer_contexts[:top_k],
-                    domain_context=domain_context,
-                )
-                set_cached_retrieval_search(
-                    query=query_clean,
-                    domain_context=domain_context,
-                    top_k=top_k,
-                    orchestrator=orchestrator_name,
-                    payload=wiki_response,
-                )
-                if bool(getattr(settings, "semantic_cache_learn_from_runtime", True)):
-                    try:
-                        upsert_semantic_cache_entry(
-                            query=query_clean,
-                            domain_context=domain_context,
-                            response_payload=wiki_response,
-                            source="runtime-search-wiki",
-                            generated_by_model=str(wiki_response.get("answer_model", "")),
-                            kind="runtime",
-                            score=float(wiki_response.get("answer_confidence", 0.0) or 0.0),
-                        )
-                    except Exception:
-                        pass
-                return wiki_response
-
-    expanded_top_k = max(top_k * 8, 40)
-    base_query = normalized_query if local_normalized else query_clean
-    variants = query_variants(base_query, retrieval_query)
-
-    original_contexts: list[dict[str, str]] = []
-    rewritten_contexts: list[dict[str, str]] = []
-    preferred_sources: list[str] = []
-    for index, variant in enumerate(variants):
-        if orchestrator_name == "llamaindex":
-            contexts = retrieve_context_with_llamaindex(variant, top_k=expanded_top_k)
-            if not contexts:
-                contexts = retrieve_context(variant, top_k=expanded_top_k)
-        else:
-            contexts = retrieve_context(variant, top_k=expanded_top_k)
-        if index == 0:
-            original_contexts = contexts
-        else:
-            rewritten_contexts.extend(contexts)
-
-    acronym_candidates = _extract_acronym_candidates(query_clean)
-    if entity_style_query and acronym_candidates:
-        for acronym in acronym_candidates[:2]:
-            _, sources = _find_acronym_expansion_in_index(acronym)
-            for source in sources:
-                if source not in preferred_sources:
-                    preferred_sources.append(source)
-        if preferred_sources:
-            boosted_contexts = _preferred_source_contexts(query=query_clean, sources=preferred_sources, limit=max(top_k, 2))
-            if boosted_contexts:
-                original_contexts = boosted_contexts + original_contexts
-
-    contexts = _merge_and_rank_contexts(
-        query=query,
-        original_contexts=original_contexts,
-        rewritten_contexts=rewritten_contexts,
-        top_k=top_k,
-    )
-    if entity_style_query and preferred_sources:
-        contexts = _promote_preferred_sources(contexts=contexts, preferred_sources=preferred_sources, top_k=top_k)
-
-    llm_payload = _synthesize_retrieval_answer(
-        query=query_clean,
-        contexts=contexts,
-        domain_context=domain_context,
-    )
-
-    retrieval_answer, retrieval_confidence = _fallback_retrieval_answer(query=query_clean, contexts=contexts)
-    retrieval_payload = {
-        "answer": retrieval_answer,
-        "answer_confidence": retrieval_confidence,
-        "answer_confidence_source": "retrieval-rule-based",
-        "answer_model": "retrieval-based",
-        "answer_path": "retrieval-rule-based",
-    }
-
-    llm_available = llm_payload.get("answer_path") == "llm"
-    llm_answer = str(llm_payload.get("answer", "")).strip() if llm_available else ""
-
-    fallback_reason = ""
-    if not llm_available:
-        fallback_reason = "llm_unavailable"
-    elif _is_llm_answer_insufficient(llm_answer, query_clean):
-        fallback_reason = "llm_low_detail"
-
-    final_answer_payload = retrieval_payload if fallback_reason else llm_payload
-
-    citations: list[RetrievalCitation] = [
-        {
-            "source": context["source"],
-            "chunk_id": context["chunk_id"],
-        }
-        for context in contexts[:4]
-    ]
-    visual_references = _build_visual_references([context["source"] for context in contexts])
-    results: list[RetrievalResultItem] = []
-    for context in contexts:
-        page_image: str = ""
-        if context.get("source", "").endswith(".pdf"):
-            img_path = render_chunk_page_image(
-                source=str(context["source"]),
-                chunk_text=str(context.get("text", "")),
-            )
-            if img_path:
-                page_image = f"/visual-previews/{quote(img_path.name)}"
-        results.append(
-            {
-                "source": context["source"],
-                "chunk_id": context["chunk_id"],
-                "excerpt": _trim_excerpt(context["text"], limit=320),
-                "page_image_url": page_image,
-            }
-        )
-
-    response: RetrievalSearchResponse = {
-        "query": query,
-        "retrieval_query": retrieval_query,
-        "orchestrator": orchestrator_name,
-        "answer": final_answer_payload["answer"],
-        "answer_confidence": final_answer_payload["answer_confidence"],
-        "answer_confidence_source": final_answer_payload.get("answer_confidence_source", "unknown"),
-        "answer_model": final_answer_payload["answer_model"],
-        "answer_path": final_answer_payload.get("answer_path", "unknown"),
-        "llm_answer": llm_answer,
-        "llm_answer_confidence": llm_payload.get("answer_confidence", 0.0) if llm_available else 0.0,
-        "llm_answer_confidence_source": llm_payload.get("answer_confidence_source", "none") if llm_available else "none",
-        "llm_answer_model": llm_payload.get("answer_model", "") if llm_available else "",
-        "retrieval_answer": retrieval_payload["answer"],
-        "retrieval_answer_confidence": retrieval_payload["answer_confidence"],
-        "retrieval_answer_confidence_source": retrieval_payload.get("answer_confidence_source", "retrieval-rule-based"),
-        "retrieval_answer_model": retrieval_payload["answer_model"],
-        "fallback_used": bool(fallback_reason),
-        "fallback_reason": fallback_reason,
-        "citations": citations,
-        "visual_references": visual_references,
-        "result_count": len(contexts),
-        "results": results,
-        "cached": False,
-        "cache_age_seconds": 0,
-        "semantic_cache_hit": False,
-        "semantic_cache_score": 0.0,
-        "semantic_cache_kind": "none",
-        "semantic_cache_source": "none",
-    }
-
-    set_cached_retrieval_search(
-        query=query_clean,
-        domain_context=domain_context,
-        top_k=top_k,
-        orchestrator=orchestrator_name,
-        payload=response,
-    )
-
-    if bool(getattr(settings, "semantic_cache_learn_from_runtime", True)):
-        try:
-            upsert_semantic_cache_entry(
-                query=query_clean,
-                domain_context=domain_context,
-                response_payload=response,
-                source="runtime-search",
-                generated_by_model=str(final_answer_payload.get("answer_model", "")),
-                kind="runtime",
-                score=float(final_answer_payload.get("answer_confidence", 0.0) or 0.0),
-            )
-        except Exception:
-            pass
-
-    return response
+        return response
+    finally:
+        MetricsCollector.finalize(query_id)
 
 
 def get_retrieval_overview() -> dict[str, Any]:
