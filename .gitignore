@@ -49,3 +49,6 @@ ui/react-dashboard/dist/
 *.json
 *.log
 *.csv
+
+# Local benchmark question bank (domain-specific; keep out of git)
+config/benchmark_questions.local.json

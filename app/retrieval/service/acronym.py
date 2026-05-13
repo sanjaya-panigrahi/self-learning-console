@@ -207,22 +207,8 @@ def find_acronym_expansion_in_index(acronym: str, max_items: int = 220) -> tuple
 
 
 DOMAIN_ACRONYM_SEEDS: dict[str, str] = {
-    "IROP": "Irregular Operations",
-    "IRROPS": "Irregular Operations",
-    "PNR": "Passenger Name Record",
-    "GDS": "Global Distribution System",
-    "DCS": "Departure Control System",
-    "PSS": "Passenger Service System",
-    "CRS": "Computer Reservation System",
-    "NDC": "New Distribution Capability",
-    "SSR": "Special Service Request",
-    "APIS": "Advance Passenger Information System",
-    "CUTE": "Common Use Terminal Equipment",
-    "CUSS": "Common Use Self-Service",
-    "PAX": "Passengers",
-    "FIDS": "Flight Information Display System",
-    "OAG": "Official Airline Guide",
-    "SSIM": "Standard Schedules Information Manual",
+    "ETA": "Estimated Time of Arrival",
+    "ETD": "Estimated Time of Departure",
     "SLA": "Service Level Agreement",
     "API": "Application Programming Interface",
     "UI": "User Interface",
@@ -235,8 +221,6 @@ DOMAIN_ACRONYM_SEEDS: dict[str, str] = {
     "SPA": "Single Page Application",
     "CSV": "Comma-Separated Values",
     "PDF": "Portable Document Format",
-    "SSDP": "Self Service Disruption Portal",
-    "TA": "Travel Agent",
 }
 
 

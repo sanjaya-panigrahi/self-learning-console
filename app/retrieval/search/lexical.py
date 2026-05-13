@@ -62,8 +62,8 @@ def is_lexical_first_query(query: str) -> bool:
     """Determine if a query should use lexical (keyword-based) search first.
 
     Lexical search is better for:
-    - Product/version-specific queries (TA Manager v1.9)
-    - Named configuration modules (Countries, Port Area Codes, Policy)
+    - Product/version-specific queries (Operations Console v1.9)
+    - Named configuration modules (Rules, Region Codes, Policy)
     - Acronym-heavy technical queries
     - Queries requiring exact term matching over semantic similarity
 

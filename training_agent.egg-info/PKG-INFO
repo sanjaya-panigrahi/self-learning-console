@@ -197,12 +197,12 @@ Quick chat test:
 ```bash
 curl -X POST http://127.0.0.1:8000/api/chat \
 	-H "Content-Type: application/json" \
-	-d '{"query":"What is the policy for manifest upload?"}'
+	-d '{"query":"What is the policy for batch import?"}'
 
 # Optional: provide domain context to keep responses generic and customer-agnostic
 curl -X POST http://127.0.0.1:8000/api/chat \
 	-H "Content-Type: application/json" \
-	-d '{"query":"What is the policy for incident escalation?","domain_context":"airport operations and ground handling"}'
+	-d '{"query":"What is the policy for incident escalation?","domain_context":"operations and support"}'
 ```
 
 Trigger reindex from the API:

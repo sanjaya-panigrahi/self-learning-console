@@ -22,27 +22,6 @@ class BenchmarkCase:
     expected_answer: str = ""
 
 
-DEFAULT_BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
-    BenchmarkCase(query="what is pnr", expected_answer="PNR stands for Passenger Name Record."),
-    BenchmarkCase(
-        query="what are the key fields in a pnr record",
-        expected_answer="Typical fields include passenger name, itinerary, contact, and ticket details.",
-    ),
-    BenchmarkCase(
-        query="what are flight disruption rules",
-        expected_answer="Disruption rules define actions and constraints for delays, cancellations, and rebooking.",
-    ),
-    BenchmarkCase(
-        query="what approval checks are needed before hotel voucher issuance",
-        expected_answer="Approval checks generally include eligibility policy and authorization gates.",
-    ),
-    BenchmarkCase(
-        query="how are follow-up workflow steps validated",
-        expected_answer="Workflow validation should confirm required fields, constraints, and exception handling.",
-    ),
-)
-
-
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -57,30 +36,48 @@ def _benchmark_eval_set_path() -> Path:
     return Path(str(settings.benchmark_eval_set_path))
 
 
+def _benchmark_questions_path() -> Path:
+    settings = get_settings()
+    configured = str(getattr(settings, "benchmark_questions_path", "")).strip()
+    if configured:
+        return Path(configured)
+    return _benchmark_eval_set_path()
+
+
+def _parse_benchmark_cases(path: Path, max_cases: int) -> list[BenchmarkCase]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    raw_cases = payload.get("cases", []) if isinstance(payload, dict) else []
+    parsed: list[BenchmarkCase] = []
+    for item in raw_cases:
+        if not isinstance(item, dict):
+            continue
+        query = str(item.get("query", "")).strip()
+        if not query:
+            continue
+        parsed.append(
+            BenchmarkCase(
+                query=query,
+                expected_answer=str(item.get("expected_answer", "")).strip(),
+            )
+        )
+    return parsed[: max(1, max_cases)] if parsed else []
+
+
 def _load_benchmark_cases(max_cases: int) -> list[BenchmarkCase]:
-    eval_path = _benchmark_eval_set_path()
-    if eval_path.exists():
-        try:
-            payload = json.loads(eval_path.read_text(encoding="utf-8"))
-            raw_cases = payload.get("cases", []) if isinstance(payload, dict) else []
-            parsed: list[BenchmarkCase] = []
-            for item in raw_cases:
-                if not isinstance(item, dict):
-                    continue
-                query = str(item.get("query", "")).strip()
-                if not query:
-                    continue
-                parsed.append(
-                    BenchmarkCase(
-                        query=query,
-                        expected_answer=str(item.get("expected_answer", "")).strip(),
-                    )
-                )
-            if parsed:
-                return parsed[: max(1, max_cases)]
-        except (json.JSONDecodeError, OSError):
-            pass
-    return list(DEFAULT_BENCHMARK_CASES[: max(1, max_cases)])
+    paths = [_benchmark_questions_path(), _benchmark_eval_set_path()]
+    seen: set[Path] = set()
+    for path in paths:
+        if path in seen or not path.exists():
+            continue
+        seen.add(path)
+        parsed = _parse_benchmark_cases(path=path, max_cases=max_cases)
+        if parsed:
+            return parsed
+    return []
 
 
 def _percentile(values: list[float], p: float) -> float:
@@ -193,6 +190,31 @@ def run_llm_benchmark(max_cases: int = 8) -> dict[str, Any]:
     max_cases = max(1, min(int(max_cases), 50))
     cases = _load_benchmark_cases(max_cases=max_cases)
     run_started = _utc_now_iso()
+
+    if not cases:
+        report = {
+            "status": "no_cases",
+            "generated_at": _utc_now_iso(),
+            "run_started_at": run_started,
+            "cases": [],
+            "summary": {
+                "case_count": 0,
+                "average_score": 0.0,
+                "score_p50": 0.0,
+                "score_p90": 0.0,
+                "cold_latency_ms_avg": 0.0,
+                "cold_latency_ms_p95": 0.0,
+                "repeat_latency_ms_avg": 0.0,
+                "repeat_latency_ms_p95": 0.0,
+                "repeat_cache_hit_rate": 0.0,
+                "repeat_under_1000ms_rate": 0.0,
+            },
+            "message": "No benchmark cases found. Add JSON cases under the configured benchmark_questions_path or benchmark_eval_set_path.",
+        }
+        path = _benchmark_report_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        return report
 
     rows: list[dict[str, Any]] = []
     cold_latencies: list[float] = []

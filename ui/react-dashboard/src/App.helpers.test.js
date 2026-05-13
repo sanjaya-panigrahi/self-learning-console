@@ -35,11 +35,11 @@ describe('retrieval URL parsing', () => {
   it('supports both domainContext and domain_context', () => {
     globalThis.window = {
       location: {
-        search: '?query=flight+rules&domain_context=policy',
+        search: '?query=workflow+rules&domain_context=policy',
       },
     }
     expect(readRetrievalSearchFromUrl()).toEqual({
-      query: 'flight rules',
+      query: 'workflow rules',
       domain_context: 'policy',
     })
 
@@ -59,7 +59,7 @@ describe('summary parsing helpers', () => {
   it('returns sections in knowledge brief heading order', () => {
     const summary = [
       '4. Execution Roadmap: Preparation -> Action -> Verification.',
-      'Document: TA Manager v1.9 | Knowledge Brief',
+      'Document: Operations Console v1.9 | Knowledge Brief',
       '1. Executive Mission: Standardize updates and reduce risk.',
     ].join('\n\n')
 
@@ -93,8 +93,8 @@ describe('summary parsing helpers', () => {
 
   it('treats complete knowledge brief as non-partial structure', () => {
     const summary = [
-      'Document: TA Airport v2.3 | Knowledge Brief',
-      '1. Executive Mission: Ensure stable disruption handling.',
+      'Document: Operations Hub v2.3 | Knowledge Brief',
+      '1. Executive Mission: Ensure stable incident handling.',
       '2. Stakeholder Matrix: Role matrix here.',
       '3. Operational Pillars: Discovery, Execution, Governance.',
       '4. Execution Roadmap: Preparation, Targeting, Action, Verification.',

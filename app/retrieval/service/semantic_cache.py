@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
+import re
 from typing import Any
 
 from qdrant_client import QdrantClient
@@ -20,6 +21,31 @@ def _client() -> QdrantClient:
 
 def _normalize(text: str | None) -> str:
     return " ".join((text or "").split()).strip().lower()
+
+
+def _acronym_tokens(text: str | None) -> set[str]:
+    raw = str(text or "")
+    return {token.lower() for token in re.findall(r"\b[A-Z0-9]{2,8}\b", raw)}
+
+
+def _response_looks_usable(query: str, response: dict[str, Any], settings: Any) -> bool:
+    answer = str(response.get("answer", "")).strip()
+    if not answer:
+        return False
+
+    min_chars = max(int(getattr(settings, "semantic_cache_min_answer_chars", 60) or 60), 20)
+    if len(answer) < min_chars:
+        return False
+
+    require_acronym_echo = bool(getattr(settings, "semantic_cache_require_acronym_echo", True))
+    if require_acronym_echo:
+        query_acronyms = _acronym_tokens(query)
+        if query_acronyms:
+            answer_norm = _normalize(answer)
+            if not any(acronym in answer_norm for acronym in query_acronyms):
+                return False
+
+    return True
 
 
 def _cache_id(query: str, domain_context: str | None) -> str:
@@ -82,25 +108,57 @@ def upsert_semantic_cache_entry(
     kind: str,
     score: float | None = None,
 ) -> bool:
+    ok, _ = upsert_semantic_cache_entry_detailed(
+        query=query,
+        domain_context=domain_context,
+        response_payload=response_payload,
+        source=source,
+        generated_by_model=generated_by_model,
+        kind=kind,
+        score=score,
+    )
+    return ok
+
+
+def upsert_semantic_cache_entry_detailed(
+    query: str,
+    domain_context: str | None,
+    response_payload: dict[str, Any],
+    source: str,
+    generated_by_model: str,
+    kind: str,
+    score: float | None = None,
+) -> tuple[bool, str]:
     settings = get_settings()
     if not bool(getattr(settings, "semantic_cache_enabled", True)):
-        return False
+        return False, "semantic_cache_disabled"
 
     query_norm = _normalize(query)
     if not query_norm:
-        return False
+        return False, "empty_query"
 
-    try:
-        vector = embed_text(query_norm)
-        if not vector:
-            return False
-    except Exception:
-        return False
+    vector = None
+    embedding_attempts = [query_norm, " ".join((query or "").split()).strip(), query_norm[:512]]
+    last_embedding_error = ""
+    for attempt_text in embedding_attempts:
+        if not attempt_text:
+            continue
+        try:
+            vector = embed_text(attempt_text)
+            if vector:
+                break
+        except Exception as exc:
+            last_embedding_error = str(exc)
+
+    if not vector:
+        if last_embedding_error:
+            return False, f"embedding_exception:{last_embedding_error}"
+        return False, "embedding_empty"
 
     try:
         _ensure_collection(len(vector))
-    except Exception:
-        return False
+    except Exception as exc:
+        return False, f"ensure_collection_exception:{exc}"
 
     now = int(time.time())
     ttl_days = max(int(getattr(settings, "semantic_cache_ttl_days", 30)), 1)
@@ -129,16 +187,16 @@ def upsert_semantic_cache_entry(
                 "score_hint": float(score) if score is not None else None,
             },
         )
-    except Exception:
-        return False
+    except Exception as exc:
+        return False, f"point_build_exception:{exc}"
 
 
     try:
         client = _client()
         client.upsert(collection_name=settings.semantic_cache_collection, points=[point])
-        return True
-    except Exception:
-        return False
+        return True, "ok"
+    except Exception as exc:
+        return False, f"upsert_exception:{exc}"
 
 
 def find_semantic_cache_hit(
@@ -194,6 +252,8 @@ def find_semantic_cache_hit(
 
         response = payload.get("response")
         if not isinstance(response, dict):
+            continue
+        if not _response_looks_usable(query=query, response=response, settings=settings):
             continue
 
         candidate = {

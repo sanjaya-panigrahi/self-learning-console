@@ -6,7 +6,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(default=None)
     domain_context: str | None = Field(
         default=None,
-        description="Optional domain or business context, e.g. airline operations, healthcare claims",
+        description="Optional domain or business context, e.g. operations workflow, healthcare claims",
     )
 
 

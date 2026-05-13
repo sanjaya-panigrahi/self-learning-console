@@ -79,8 +79,8 @@ def test_write_answer_page_merges_semantic_variant_question(
     wiki_dir = tmp_path / "wiki"
 
     first = wiki_writer.write_answer_page(
-        question="What is IROP?",
-        answer="IROP means Irregular Operations.",
+        question="What is incident management?",
+        answer="Incident management is a structured process for handling unexpected operational issues.",
         wiki_dir=wiki_dir,
         confidence=0.9,
         sources=["Resources/doc-a.pdf"],
@@ -88,8 +88,8 @@ def test_write_answer_page_merges_semantic_variant_question(
         trigger="admin-api",
     )
     second = wiki_writer.write_answer_page(
-        question="Can you explain irregular operations?",
-        answer="Irregular operations are disruption handling workflows. They activate during cancellations, weather, or crew issues.",
+        question="Can you explain incident management?",
+        answer="Incident management uses incident-handling workflows. They activate during outages, errors, or dependency issues.",
         wiki_dir=wiki_dir,
         confidence=0.88,
         sources=["Resources/doc-a.pdf"],
@@ -102,7 +102,7 @@ def test_write_answer_page_merges_semantic_variant_question(
     assert len(list(answers_dir.glob("*.md"))) == 1
 
     content = first.read_text(encoding="utf-8")
-    assert "Can you explain irregular operations?" in content
+    assert "Can you explain incident management?" in content
     # Enriched answer should include the more detailed incoming answer
-    assert "disruption handling workflows" in content
-    assert "cancellations, weather, or crew issues" in content
+    assert "incident-handling workflows" in content
+    assert "outages, errors, or dependency issues" in content

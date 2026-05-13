@@ -93,7 +93,7 @@
     "knowledgeSearch": "Knowledge search",
     "resultsSuffix": "results",
     "queryPlaceholder": "Ask about a workflow, policy, or process",
-    "domainContextPlaceholder": "Optional domain context, e.g. airline disruption management",
+    "domainContextPlaceholder": "Optional domain context, e.g. operations management",
     "searching": "Searching...",
     "searchMaterial": "Search Material",
     "retrievalQuery": "Retrieval query",

@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     pii_approval_path: str = str(PROJECT_ROOT / "data" / "indexes" / "pii_approvals.json")
     feedback_log_path: str = str(PROJECT_ROOT / "data" / "indexes" / "feedback_log.json")
     benchmark_report_path: str = str(PROJECT_ROOT / "data" / "indexes" / "benchmark_report.json")
+    benchmark_questions_path: str = str(PROJECT_ROOT / "config" / "benchmark_questions.local.json")
     benchmark_eval_set_path: str = str(PROJECT_ROOT / "data" / "indexes" / "benchmark_eval_set.json")
     deploy_intel_report_path: str = str(PROJECT_ROOT / "data" / "indexes" / "deploy_intelligence_report.json")
     deploy_intel_knowledge_cards_path: str = str(PROJECT_ROOT / "data" / "indexes" / "knowledge_cards.json")
@@ -104,6 +105,8 @@ class Settings(BaseSettings):
     semantic_cache_ttl_days: int = 30
     semantic_cache_learn_from_runtime: bool = True
     semantic_cache_max_answer_chars: int = 2200
+    semantic_cache_min_answer_chars: int = 60
+    semantic_cache_require_acronym_echo: bool = True
     warm_cache_enabled: bool = True
     warm_cache_on_deploy: bool = True
     warm_cache_blocking: bool = False

@@ -41,13 +41,13 @@ def test_upload_training_content(monkeypatch, tmp_path) -> None:
 
     response = client.post(
         "/api/admin/upload",
-        files={"file": ("policy.txt", b"manifest upload policy", "text/plain")},
+            files={"file": ("policy.txt", b"batch import policy", "text/plain")},
     )
 
     assert response.status_code == 200
     assert response.json()["status"] == "uploaded"
     assert response.json()["filename"] == "policy.txt"
-    assert (tmp_path / "policy.txt").read_text(encoding="utf-8") == "manifest upload policy"
+        assert (tmp_path / "policy.txt").read_text(encoding="utf-8") == "batch import policy"
 
 
 def test_upload_accepts_pdf_extension(monkeypatch, tmp_path) -> None:
@@ -100,7 +100,7 @@ def test_chat_endpoint_with_mocked_ollama(monkeypatch) -> None:
     monkeypatch.setattr(
             "app.api.routes.chat.search_retrieval_material",
             lambda query, domain_context=None, top_k=3: {
-                "answer": "Manifest upload requires UTF-8 CSV and valid headers.",
+                "answer": "Batch import requires UTF-8 CSV and valid headers.",
                 "citations": [{"source": "policy.txt", "chunk_id": "policy-chunk-0001"}],
                 "answer_confidence": 0.75,
             },
@@ -108,11 +108,11 @@ def test_chat_endpoint_with_mocked_ollama(monkeypatch) -> None:
 
     response = client.post(
         "/api/chat",
-        json={"query": "What is required for manifest upload?"},
+        json={"query": "What is required for batch import?"},
     )
 
     assert response.status_code == 200
-    assert response.json()["answer"] == "Manifest upload requires UTF-8 CSV and valid headers."
+    assert response.json()["answer"] == "Batch import requires UTF-8 CSV and valid headers."
     assert response.json()["citations"] == [
         {"source": "policy.txt", "chunk_id": "policy-chunk-0001"}
     ]
@@ -136,7 +136,7 @@ def test_chat_endpoint_returns_ollama_fallback_on_error(monkeypatch) -> None:
 
     response = client.post(
         "/api/chat",
-        json={"query": "What is required for manifest upload?"},
+        json={"query": "What is required for batch import?"},
     )
 
     assert response.status_code == 200
@@ -153,7 +153,7 @@ def test_chat_endpoint_returns_ollama_fallback_on_error(monkeypatch) -> None:
 def test_run_ingestion_blocks_pii_and_writes_report(monkeypatch, tmp_path) -> None:
     source_dir = tmp_path / "Resources"
     source_dir.mkdir()
-    (source_dir / "clean.txt").write_text("Manifest upload needs UTF-8 and valid headers.", encoding="utf-8")
+    (source_dir / "clean.txt").write_text("Batch import needs UTF-8 and valid headers.", encoding="utf-8")
     (source_dir / "pii.txt").write_text("The password for this account is temporary.", encoding="utf-8")
 
     index_path = tmp_path / "index.json"
@@ -404,16 +404,16 @@ def test_material_insight_endpoint_forwards_use_cache(monkeypatch) -> None:
     response = client.post(
         "/api/admin/material-insight",
         json={
-            "source": "Levarti/TXT/Sorting & SortBy Result Sets.txt",
+            "source": "SampleDocs/TXT/Sorting & SortBy Result Sets.txt",
             "domain_context": "enterprise onboarding",
             "use_cache": False,
         },
     )
 
     assert response.status_code == 200
-    assert response.json() == {"source": "Levarti/TXT/Sorting & SortBy Result Sets.txt", "summary": "ok"}
+    assert response.json() == {"source": "SampleDocs/TXT/Sorting & SortBy Result Sets.txt", "summary": "ok"}
     assert captured == {
-        "source": "Levarti/TXT/Sorting & SortBy Result Sets.txt",
+        "source": "SampleDocs/TXT/Sorting & SortBy Result Sets.txt",
         "domain_context": "enterprise onboarding",
         "use_cache": False,
     }
@@ -442,7 +442,7 @@ def test_material_insight_stream_emits_progress_and_result(monkeypatch) -> None:
     response = client.post(
         "/api/admin/material-insight-stream",
         json={
-            "source": "Levarti/Documents/User Guides/TA Manager_v1.9.pdf",
+            "source": "SampleDocs/Documents/User Guides/Operations_Guide_v1.0.pdf",
             "domain_context": "enterprise onboarding",
             "use_cache": True,
         },

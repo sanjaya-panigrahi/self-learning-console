@@ -93,16 +93,7 @@ export default function RetrievalTab({
     const selectedQuestionNorm = normalizeQuestion(selectedQuestion)
     const selectedTokens = new Set(selectedQuestionNorm.split(' ').filter((token) => token.length >= 4))
 
-    const slides = [
-      {
-        id: `selected-${selectedQuestionNorm}`,
-        title: text.retrieval.selectedQuestionAnswerTitle ?? 'Selected question answer',
-        question: selectedQuestion,
-        answer:
-          String(selectedSuggestedQa?.answer || '').trim()
-          || (text.retrieval.noAlignedAnswer ?? 'No pre-filed aligned answer found for this question yet. Use Knowledge search to generate one.'),
-      },
-    ]
+    const slides = []
 
     const liveQueryNorm = normalizeQuestion(retrievalResults?.retrieval_query || retrievalSearch?.query)
     const liveAnswer = String(retrievalResults?.answer || '').trim()
@@ -156,7 +147,6 @@ export default function RetrievalTab({
     return [...slides, ...relatedSlides]
   }, [selectedSuggestedQa, retrievalResults, retrievalSearch, text, uiAlignedQaItems])
 
-  const selectedAnswerSlide = answerSlides.find((item) => item.id.startsWith('selected-'))
   const liveAnswerSlide = answerSlides.find((item) => item.id.startsWith('live-'))
   const relatedAnswerSlides = answerSlides.filter(
     (item) => !item.id.startsWith('selected-') && !item.id.startsWith('live-'),
@@ -291,14 +281,6 @@ export default function RetrievalTab({
                       {selectedSuggestedQa?.question ? (
                         <div className="qa-collapsible-stack">
                           <details className="qa-collapsible" open>
-                            <summary>{selectedAnswerSlide?.title ?? (text.retrieval.selectedQuestionAnswerTitle ?? 'Selected question answer')}</summary>
-                            <div className="qa-collapsible-body">
-                              <strong>{selectedAnswerSlide?.question || selectedSuggestedQa?.question}</strong>
-                              <p>{selectedAnswerSlide?.answer}</p>
-                            </div>
-                          </details>
-
-                          <details className="qa-collapsible">
                             <summary>{liveAnswerSlide?.title ?? (text.retrieval.liveSearchAnswerTitle ?? 'Live knowledge-search answer')}</summary>
                             <div className="qa-collapsible-body">
                               <strong>{liveAnswerSlide?.question || retrievalSearch?.query || selectedSuggestedQa?.question}</strong>

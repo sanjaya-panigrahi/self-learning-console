@@ -21,8 +21,8 @@ def test_run_llm_benchmark_uses_eval_set_and_persists_report(tmp_path, monkeypat
         json.dumps(
             {
                 "cases": [
-                    {"query": "what is pnr", "expected_answer": "Passenger Name Record"},
-                    {"query": "what is ssdp", "expected_answer": "Self Service Disruption Portal"},
+                    {"query": "what is a record identifier", "expected_answer": "Unique record key"},
+                    {"query": "what is an approval gate", "expected_answer": "Policy authorization checkpoint"},
                 ]
             }
         ),

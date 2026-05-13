@@ -217,7 +217,7 @@ def build_knowledge_brief_summary(
     lifecycle_triggers = _format_bullets([
         "Routine: Use during regular maintenance, configuration updates, and operational data refreshes.",
         "Onboarding: Use when provisioning new users, setting roles, or preparing new environments.",
-        "Incident Response: Use during urgent troubleshooting, disruption handling, and production hotfixes.",
+        "Incident Response: Use during urgent troubleshooting, operational-event handling, and production hotfixes.",
     ])
 
     summary = "\n\n".join([

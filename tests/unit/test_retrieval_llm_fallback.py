@@ -20,7 +20,7 @@ def test_insufficient_when_contains_weak_phrase(monkeypatch) -> None:
 
     assert service._is_llm_answer_insufficient(
         "I cannot provide an answer for this request.",
-        "What is SSDP?",
+        "What is ACM?",
     )
 
 
@@ -28,8 +28,8 @@ def test_insufficient_for_short_entity_answer_without_definition_pattern(monkeyp
     monkeypatch.setattr(service, "get_settings", lambda: _FallbackOnSettings())
 
     assert service._is_llm_answer_insufficient(
-        "SSDP appears in onboarding content but details are limited.",
-        "What is SSDP?",
+        "ACM appears in onboarding content but details are limited.",
+        "What is ACM?",
     )
 
 
@@ -37,20 +37,20 @@ def test_sufficient_for_entity_answer_with_definition(monkeypatch) -> None:
     monkeypatch.setattr(service, "get_settings", lambda: _FallbackOnSettings())
 
     long_answer = (
-        "SSDP means Self Service Disruption Portal and is used by travel agents and operations teams "
-        "to process disruption workflows, validate policy constraints, and submit approved actions "
+        "ACM means Adaptive Case Manager and is used by operators and support teams "
+        "to process workflow actions, validate policy constraints, and submit approved updates "
         "through the enterprise onboarding and operations flow."
     )
 
-    assert not service._is_llm_answer_insufficient(long_answer, "What is SSDP?")
+    assert not service._is_llm_answer_insufficient(long_answer, "What is ACM?")
 
 
 def test_insufficient_for_procedural_answer_that_only_points_to_document(monkeypatch) -> None:
     monkeypatch.setattr(service, "get_settings", lambda: _FallbackOnSettings())
 
     assert service._is_llm_answer_insufficient(
-        "Refer to Edit Country module in TA Manager_v1.9.pdf for filtering and sorting country data.",
-        "How do you filter and sort country data within the TA Manager interface?",
+        "Refer to Edit Entries module in Operations_Guide_v1.0.pdf for filtering and sorting dataset entries.",
+        "How do you filter and sort dataset entries within the operations interface?",
     )
 
 
@@ -65,7 +65,7 @@ def test_sufficient_for_detailed_procedural_answer(monkeypatch) -> None:
 
     assert not service._is_llm_answer_insufficient(
         detailed_answer,
-        "How do you filter and sort country data within the TA Manager interface?",
+        "How do you filter and sort dataset entries within the operations interface?",
     )
 
 
@@ -74,5 +74,5 @@ def test_fallback_gate_disabled(monkeypatch) -> None:
 
     assert not service._is_llm_answer_insufficient(
         "brief answer",
-        "What is SSDP?",
+        "What is ACM?",
     )

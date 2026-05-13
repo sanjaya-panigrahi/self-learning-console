@@ -128,9 +128,9 @@ _QUESTION_STOPWORDS = {
 }
 
 _QUESTION_EQUIVALENT_TERMS = {
-    "irop": "irregular operations",
-    "irops": "irregular operations",
-    "irrops": "irregular operations",
+    "id": "identifier",
+    "ids": "identifiers",
+    "svc": "service",
 }
 
 
