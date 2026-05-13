@@ -383,6 +383,61 @@ button {
   justify-content: flex-end;
 }
 
+/* ── Ingestion progress bar ──────────────────────────────────────── */
+.ingestion-progress {
+  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+}
+
+.ingestion-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ingestion-status-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+
+.ingestion-status-running {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+
+.ingestion-progress-label {
+  font-size: 0.82rem;
+  color: #c6d1d8;
+}
+
+.ingestion-pct {
+  font-size: 0.88rem;
+  color: #f7b267;
+}
+
+.progress-bar-track {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ade80, #22d3ee);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.sidebar-progress {
+  margin-top: 6px;
+}
+
 .trace-limit-label {
   color: #8a9db1;
   font-size: 0.8rem;

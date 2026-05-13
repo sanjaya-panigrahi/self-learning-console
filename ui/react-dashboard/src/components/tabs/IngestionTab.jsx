@@ -2,6 +2,9 @@ export default function IngestionTab({ text, loading, files, ingestionStatus, Ba
   const liveRunning = ingestionStatus?.state === 'running'
   const processedFiles = Number(ingestionStatus?.processed_files || files.length || 0)
   const totalFiles = Number(ingestionStatus?.total_files || 0)
+  const chunks = Number(ingestionStatus?.indexed_chunks || 0)
+  const state = ingestionStatus?.state || 'idle'
+  const pct = totalFiles > 0 ? Math.min(100, Math.round((processedFiles / totalFiles) * 100)) : null
 
   return (
     <section className="panel-grid panel-grid-ingestion">
@@ -10,11 +13,27 @@ export default function IngestionTab({ text, loading, files, ingestionStatus, Ba
           <div>
             <p className="eyebrow">{text.ingestion.ledger}</p>
             <h3>{text.ingestion.processedFiles}</h3>
-            <p className="meta-line">
-              {liveRunning
-                ? `Indexing in progress: ${processedFiles}${totalFiles > 0 ? ` / ${totalFiles}` : ''} files, ${Number(ingestionStatus?.indexed_chunks || 0)} chunks.`
-                : `Last run state: ${ingestionStatus?.state || 'idle'}`}
-            </p>
+            {liveRunning ? (
+              <div className="ingestion-progress">
+                <div className="ingestion-progress-row">
+                  <span className="ingestion-status-pill ingestion-status-running">● Running</span>
+                  <span className="ingestion-progress-label">
+                    {processedFiles}{totalFiles > 0 ? ` / ${totalFiles} files` : ' files'}&nbsp;·&nbsp;{chunks} chunks
+                    {pct !== null && <strong className="ingestion-pct">&nbsp;{pct}%</strong>}
+                  </span>
+                </div>
+                {pct !== null && (
+                  <div className="progress-bar-track" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+                    <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="meta-line">
+                Last run:&nbsp;<strong>{state}</strong>
+                {state === 'completed' && totalFiles > 0 && ` — ${totalFiles} files, ${chunks} chunks`}
+              </p>
+            )}
           </div>
           <span>{loading ? text.ingestion.refreshing : `${files.length} ${text.ingestion.rowsSuffix}`}</span>
         </div>

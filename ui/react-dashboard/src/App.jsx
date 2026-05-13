@@ -1156,7 +1156,25 @@ function App() {
           {isAdminView && (
             <button className="primary-button" onClick={triggerReindex}>{text.actions.runReindex}</button>
           )}
-          <p className="status-message">{actionMessage || text.actions.noActiveOperations}</p>
+          {(() => {
+            const isReindexRunning = String(ingestionStatus?.state || '').toLowerCase() === 'running'
+            const done = Number(ingestionStatus?.processed_files || 0)
+            const total = Number(ingestionStatus?.total_files || 0)
+            const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : null
+            const liveMsg = isReindexRunning
+              ? `Reindex: ${done}${total > 0 ? ` / ${total}` : ''} files${pct !== null ? ` · ${pct}%` : ''}`
+              : null
+            return (
+              <>
+                <p className="status-message">{actionMessage || liveMsg || text.actions.noActiveOperations}</p>
+                {isReindexRunning && pct !== null && (
+                  <div className="progress-bar-track sidebar-progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+                    <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
+                  </div>
+                )}
+              </>
+            )
+          })()}
         </div>
       </aside>
 

@@ -138,17 +138,27 @@ def upsert_semantic_cache_entry_detailed(
         return False, "empty_query"
 
     vector = None
-    embedding_attempts = [query_norm, " ".join((query or "").split()).strip(), query_norm[:512]]
+    answer_fallback = " ".join(str(response_payload.get("answer", "")).split()).strip()
+    embedding_attempts = [
+        query_norm,
+        " ".join((query or "").split()).strip(),
+        query_norm[:512],
+        answer_fallback[:512],
+    ]
+    # Keep order stable while removing blanks/duplicates.
+    embedding_attempts = [text for index, text in enumerate(embedding_attempts) if text and text not in embedding_attempts[:index]]
     last_embedding_error = ""
     for attempt_text in embedding_attempts:
-        if not attempt_text:
-            continue
-        try:
-            vector = embed_text(attempt_text)
-            if vector:
-                break
-        except Exception as exc:
-            last_embedding_error = str(exc)
+        for _ in range(3):
+            try:
+                vector = embed_text(attempt_text)
+                if vector:
+                    break
+            except Exception as exc:
+                last_embedding_error = str(exc)
+            time.sleep(0.2)
+        if vector:
+            break
 
     if not vector:
         if last_embedding_error:

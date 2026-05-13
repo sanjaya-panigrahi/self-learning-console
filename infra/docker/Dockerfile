@@ -25,7 +25,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir --retries 5 --timeout 120 --disable-pip-version-check -r requirements.txt
+# Some environments inject PIP_REQUIRE_HASHES=1 globally; disable it here to
+# avoid transient hash-mismatch failures for transitive wheels during image builds.
+RUN PIP_REQUIRE_HASHES=0 pip install --no-cache-dir --retries 5 --timeout 120 --disable-pip-version-check -r requirements.txt
 
 COPY app ./app
 COPY prompts ./prompts

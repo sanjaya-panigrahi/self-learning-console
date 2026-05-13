@@ -342,7 +342,7 @@ def _build_response_payload(question: str, answer: str, source: str, chunk_ids: 
     }
 
 
-def _process_source(source: str, chunks: list[dict[str, Any]], model: str) -> int:
+def _process_source(source: str, chunks: list[dict[str, Any]], model: str) -> dict[str, Any]:
     settings = get_settings()
     retries = max(int(getattr(settings, "warm_cache_retry_max", 2)), 0)
     retry_backoff = max(float(getattr(settings, "warm_cache_retry_backoff_seconds", 1.5)), 0.0)
@@ -390,7 +390,7 @@ def _process_source(source: str, chunks: list[dict[str, Any]], model: str) -> in
             else:
                 raise RuntimeError(f"{source} generation failed: {last_error}") from last_error
         if not qa_items:
-            return 0
+            return {"inserted": 0, "complete": True, "error": ""}
 
     inserted = 0
     failed_reasons: dict[str, int] = defaultdict(int)
@@ -423,7 +423,15 @@ def _process_source(source: str, chunks: list[dict[str, Any]], model: str) -> in
             f"{source} cache upsert failed for {len(qa_items)} item(s): {top_reason[0]} x{top_reason[1]}"
         )
 
-    return inserted
+    if failed_reasons:
+        top_reason = max(failed_reasons.items(), key=lambda pair: pair[1])
+        return {
+            "inserted": inserted,
+            "complete": False,
+            "error": f"{source} cache upsert partial failure: {top_reason[0]} x{top_reason[1]} (inserted={inserted}/{len(qa_items)})",
+        }
+
+    return {"inserted": inserted, "complete": True, "error": ""}
 
 
 def _run_job() -> None:
@@ -496,7 +504,7 @@ def _run_job() -> None:
         workers_per_model = max(int(getattr(settings, "warm_cache_workers_per_model", 1)), 1)
         max_workers = max(1, min(len(grouped), len(models) * workers_per_model))
 
-        futures: list[concurrent.futures.Future[int]] = []
+        futures: list[concurrent.futures.Future[dict[str, Any]]] = []
         future_to_source: dict[concurrent.futures.Future[int], str] = {}
         future_to_fingerprint: dict[concurrent.futures.Future[int], str] = {}
         heartbeat_interval_seconds = max(float(getattr(settings, "warm_cache_heartbeat_seconds", 10.0)), 2.0)
@@ -538,11 +546,16 @@ def _run_job() -> None:
                     fp = future_to_fingerprint.get(future, "")
                     inserted = 0
                     try:
-                        inserted = int(future.result() or 0)
+                        result = future.result() or {}
+                        inserted = int(result.get("inserted") or 0)
+                        is_complete = bool(result.get("complete", True))
+                        partial_error = str(result.get("error") or "").strip()
                         written_total += inserted
-                        # Persist success so re-runs skip this source.
-                        if inserted > 0 and source_name and fp:
+                        # Persist success only for fully successful sources.
+                        if is_complete and inserted > 0 and source_name and fp:
                             _mark_source_done(manifest, source_name, fp, inserted)
+                        if not is_complete and partial_error:
+                            _append_error(partial_error)
                     except Exception as exc:
                         _append_error(str(exc))
                     if source_name:
