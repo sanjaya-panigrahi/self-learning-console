@@ -22,7 +22,7 @@ def test_write_answer_page_rejects_unknown_trigger(tmp_path: Path, monkeypatch: 
             answer="Details",
             wiki_dir=tmp_path / "wiki",
             confidence=0.95,
-            sources=["Resources/doc-a.pdf"],
+            sources=["source-a.pdf"],
             filed_by="admin-api",
             trigger="background-loop",
         )
@@ -52,7 +52,7 @@ def test_auto_helpful_requires_confidence(tmp_path: Path, monkeypatch: pytest.Mo
             answer="Details",
             wiki_dir=tmp_path / "wiki",
             confidence=0.65,
-            sources=["Resources/doc-a.pdf"],
+            sources=["source-a.pdf"],
             filed_by="auto-helpful",
             trigger="feedback-auto-helpful",
         )
@@ -83,7 +83,7 @@ def test_write_answer_page_merges_semantic_variant_question(
         answer="Incident management is a structured process for handling unexpected operational issues.",
         wiki_dir=wiki_dir,
         confidence=0.9,
-        sources=["Resources/doc-a.pdf"],
+        sources=["source-a.pdf"],
         filed_by="admin-api",
         trigger="admin-api",
     )
@@ -92,7 +92,7 @@ def test_write_answer_page_merges_semantic_variant_question(
         answer="Incident management uses incident-handling workflows. They activate during outages, errors, or dependency issues.",
         wiki_dir=wiki_dir,
         confidence=0.88,
-        sources=["Resources/doc-a.pdf"],
+        sources=["source-a.pdf"],
         filed_by="admin-api",
         trigger="admin-api",
     )

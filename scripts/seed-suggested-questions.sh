@@ -32,6 +32,7 @@ while [ $# -gt 0 ]; do
 done
 
 RETRIES=12
+POST_RETRIES=5
 
 wait_for_ready() {
   echo "Waiting for API to be ready at ${BASE_URL} ..."
@@ -55,10 +56,42 @@ echo ""
 
 # Use a temp file so we can show the raw body on error
 TMP_RESPONSE="$(mktemp)"
-HTTP_CODE=$(curl -sS -o "$TMP_RESPONSE" -w "%{http_code}" \
-  -X POST "${BASE_URL}/api/admin/seed-suggested-questions" \
-  -H 'Content-Type: application/json' \
-  -d "{\"force\": ${FORCE}, \"concurrency\": ${CONCURRENCY}}")
+HTTP_CODE=""
+LAST_CURL_EXIT=0
+
+for i in $(seq 1 "$POST_RETRIES"); do
+  LAST_CURL_EXIT=0
+  HTTP_CODE=""
+  if HTTP_CODE=$(curl -sS -o "$TMP_RESPONSE" -w "%{http_code}" \
+    --connect-timeout 8 \
+    --max-time 180 \
+    -X POST "${BASE_URL}/api/admin/seed-suggested-questions" \
+    -H 'Content-Type: application/json' \
+    -d "{\"force\": ${FORCE}, \"concurrency\": ${CONCURRENCY}}"); then
+    LAST_CURL_EXIT=0
+  else
+    LAST_CURL_EXIT=$?
+  fi
+
+  if [ "$LAST_CURL_EXIT" -eq 0 ] && [ "$HTTP_CODE" = "200" ]; then
+    break
+  fi
+
+  if [ "$i" -lt "$POST_RETRIES" ]; then
+    if [ "$LAST_CURL_EXIT" -ne 0 ]; then
+      echo "  Seeder request failed (curl exit $LAST_CURL_EXIT, attempt $i/$POST_RETRIES). Retrying in 3s..."
+    else
+      echo "  Seeder request returned HTTP $HTTP_CODE (attempt $i/$POST_RETRIES). Retrying in 3s..."
+    fi
+    sleep 3
+  fi
+done
+
+if [ "$LAST_CURL_EXIT" -ne 0 ]; then
+  echo "ERROR: seeder request failed after $POST_RETRIES attempts (curl exit $LAST_CURL_EXIT)."
+  rm -f "$TMP_RESPONSE"
+  exit 1
+fi
 
 if [ "$HTTP_CODE" != "200" ]; then
   echo "ERROR: API returned HTTP $HTTP_CODE"

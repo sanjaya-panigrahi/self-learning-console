@@ -47,7 +47,7 @@ def test_upload_training_content(monkeypatch, tmp_path) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "uploaded"
     assert response.json()["filename"] == "policy.txt"
-        assert (tmp_path / "policy.txt").read_text(encoding="utf-8") == "batch import policy"
+    assert (tmp_path / "policy.txt").read_text(encoding="utf-8") == "batch import policy"
 
 
 def test_upload_accepts_pdf_extension(monkeypatch, tmp_path) -> None:
@@ -442,7 +442,7 @@ def test_material_insight_stream_emits_progress_and_result(monkeypatch) -> None:
     response = client.post(
         "/api/admin/material-insight-stream",
         json={
-            "source": "SampleDocs/Documents/User Guides/Operations_Guide_v1.0.pdf",
+            "source": "SampleDocs/docs/operations_guide_v1_0.pdf",
             "domain_context": "enterprise onboarding",
             "use_cache": True,
         },

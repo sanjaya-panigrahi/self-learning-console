@@ -1,13 +1,36 @@
 #!/usr/bin/env python3
 """Test script to verify PDF metadata extraction."""
 
+import argparse
+import os
 from pathlib import Path
 from app.ingestion.readers import read_pdf_file
 
-# Test with a sample PDF
-test_pdf = Path("Resources/Documents/User Guides/TA Ramp User Guide_v1.5 1.pdf")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Inspect extracted metadata for a PDF file.")
+    parser.add_argument(
+        "pdf_path",
+        nargs="?",
+        help="Path to a PDF file. You can also set TEST_PDF_PATH.",
+    )
+    return parser.parse_args()
 
-if test_pdf.exists():
+
+def resolve_pdf_path() -> Path | None:
+    args = parse_args()
+    candidate = args.pdf_path or os.environ.get("TEST_PDF_PATH", "")
+    candidate = str(candidate).strip()
+    if not candidate:
+        return None
+    return Path(candidate)
+
+
+test_pdf = resolve_pdf_path()
+
+if test_pdf is None:
+    print("Usage: python test_pdf_metadata.py <path-to-pdf>")
+    print("Or set environment variable TEST_PDF_PATH.")
+elif test_pdf.exists():
     print(f"Testing PDF: {test_pdf}")
     print("-" * 80)
     

@@ -3,24 +3,22 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "training-agent"
+name = "self-learning-console"
 version = "0.1.0"
-description = "AI-powered training agent with RAG, retrieval, and material ingestion"
+description = "Self Learning Console for retrieval, knowledge building, and document intelligence workflows"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "Training Agent Team"}
+    {name = "Self Learning Console Team"}
 ]
-keywords = ["ai", "rag", "retrieval", "llm", "training"]
+keywords = ["ai", "rag", "retrieval", "knowledge-builder", "knowledge-base", "llm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Web Environment",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
