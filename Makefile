@@ -1,4 +1,4 @@
-.PHONY: help build deploy deploy-trace-on deploy-trace-off reindex warm-cache warm-cache-blocking deploy-intelligence deploy-intelligence-blocking precompute-parallel watch-status seed migrate healthcheck clean
+.PHONY: help build deploy deploy-trace-on deploy-trace-off reindex warm-cache warm-cache-blocking deploy-intelligence deploy-intelligence-blocking precompute-parallel watch-status seed seed-suggested-questions seed-suggested-questions-all migrate healthcheck clean
 
 PROJECT_NAME := self-learning-console
 DOCKER_COMPOSE := docker compose --env-file .env -f infra/docker/docker-compose.yml
@@ -19,11 +19,13 @@ help:
 	@echo "  make deploy-trace-off  Deploy with LangSmith tracing disabled (local mode)"
 	@echo "  make reindex           Run ingestion + index all documents"
 	@echo "  make warm-cache        Trigger semantic warm-cache job via admin API"
-	@echo "  make deploy-intelligence Trigger full AI precompute + benchmark gate"
-	@echo "  make precompute-parallel Run reindex + warm-cache + deploy-intelligence"
-	@echo "  make watch-status       Watch warm-cache + deploy-intelligence status"
-	@echo "  make seed               Seed indexed content, cache, and deploy-intelligence artifacts"
-	@echo "  make migrate            Run blocking deploy-intelligence refresh"
+	@echo "  make deploy-intelligence Trigger full knowledge builder + benchmark gate"
+	@echo "  make precompute-parallel Run reindex + warm-cache + knowledge builder"
+	@echo "  make watch-status       Watch warm-cache + knowledge builder status"
+	@echo "  make seed               Seed indexed content, cache, and knowledge builder artifacts"
+	@echo "  make seed-suggested-questions  Pre-cache answers for all suggested questions from insights"
+	@echo "  make seed-suggested-questions-all  Generate insights for all indexed docs and pre-cache all suggested questions"
+	@echo "  make migrate            Run blocking knowledge builder refresh"
 	@echo "  make healthcheck        Check /health and /ready endpoints"
 	@echo "  make clean    Stop containers and remove volumes + local cache"
 
@@ -102,15 +104,15 @@ deploy-intelligence:
 		curl -fsS -X POST 'http://localhost:$(API_PORT)/api/admin/deploy-intelligence/run' \
 			-H 'Content-Type: application/json' \
 			-d '{\"force\": false, \"blocking\": false}' && exit 0; \
-		echo 'Deploy-intelligence endpoint not ready yet (attempt '$$i'/10). Retrying...'; \
+		echo 'Knowledge builder endpoint not ready yet (attempt '$$i'/10). Retrying...'; \
 		sleep 2; \
 	done; \
-	echo 'Unable to trigger deploy-intelligence pipeline after retries'; \
+	echo 'Unable to trigger knowledge builder pipeline after retries'; \
 	exit 0" >/tmp/self-learning-console-deploy-intel.log 2>&1 </dev/null &
-	@echo "Deploy-intelligence trigger running asynchronously (see /tmp/self-learning-console-deploy-intel.log)"
+	@echo "Knowledge builder trigger running asynchronously (see /tmp/self-learning-console-deploy-intel.log)"
 
 deploy-intelligence-blocking:
-	@echo "Triggering blocking deploy-intelligence pipeline on http://localhost:$(API_PORT)"
+	@echo "Triggering blocking knowledge builder pipeline on http://localhost:$(API_PORT)"
 	@for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do \
 		curl -fsS "http://localhost:$(API_PORT)/ready" >/dev/null && break; \
 		echo "API readiness not available yet (attempt $$i/15). Retrying..."; \
@@ -121,9 +123,9 @@ deploy-intelligence-blocking:
 		curl -fsS -X POST "http://localhost:$(API_PORT)/api/admin/deploy-intelligence/run" \
 			-H "Content-Type: application/json" \
 			-d '{"force": false, "blocking": true}' >/tmp/self-learning-console-deploy-intel-last.json && break; \
-		echo "Deploy-intelligence endpoint not ready yet (attempt $$i/10). Retrying..."; \
+		echo "Knowledge builder endpoint not ready yet (attempt $$i/10). Retrying..."; \
 		sleep 2; \
-		if [ $$i -eq 10 ]; then echo "Unable to trigger deploy-intelligence pipeline after retries"; exit 1; fi; \
+		if [ $$i -eq 10 ]; then echo "Unable to trigger knowledge builder pipeline after retries"; exit 1; fi; \
 	done
 	@if [ "$(DEPLOY_AI_GATE_ENFORCE)" = "true" ]; then \
 		python3 -c "import json,sys;d=json.load(open('/tmp/self-learning-console-deploy-intel-last.json'));ok=bool((((d.get('report') or {}).get('gate_passed'))));print('Deploy AI gate passed:',ok);sys.exit(0 if ok else 2)"; \
@@ -140,6 +142,12 @@ watch-status:
 
 seed:
 	sh scripts/seed.sh http://127.0.0.1:$(API_PORT)
+
+seed-suggested-questions:
+	sh scripts/seed-suggested-questions.sh http://127.0.0.1:$(API_PORT)
+
+seed-suggested-questions-all:
+	sh scripts/seed-suggested-questions-all-docs.sh http://127.0.0.1:$(API_PORT)
 
 migrate:
 	sh scripts/migrate.sh http://127.0.0.1:$(API_PORT)

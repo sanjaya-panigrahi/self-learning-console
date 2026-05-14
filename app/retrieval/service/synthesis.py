@@ -21,6 +21,30 @@ from app.retrieval.service.scoring import search_tokens, trim_excerpt
 logger = logging.getLogger(__name__)
 
 
+def _format_source_reference(source: str, page_number: int | None = None) -> str:
+    label = str(source or "unknown").strip() or "unknown"
+    if page_number is None:
+        return label
+    return f"{label} (p.{page_number})"
+
+
+def _collect_source_references(contexts: list[dict[str, Any]], limit: int = 4) -> list[str]:
+    references: list[str] = []
+    seen: set[tuple[str, int | None]] = set()
+    for item in contexts:
+        source = str(item.get("source", "unknown")).strip() or "unknown"
+        raw_page = item.get("page_number")
+        page_number = int(raw_page) if isinstance(raw_page, int) else None
+        key = (source, page_number)
+        if key in seen:
+            continue
+        seen.add(key)
+        references.append(_format_source_reference(source=source, page_number=page_number))
+        if len(references) >= limit:
+            break
+    return references
+
+
 def _extract_sort_columns(sentences: list[str]) -> list[str]:
     columns: list[str] = []
     seen: set[str] = set()
@@ -70,7 +94,7 @@ def _extract_sort_columns(sentences: list[str]) -> list[str]:
 
 def build_retrieval_answer_prompt(
     query: str,
-    contexts: list[dict[str, str]],
+    contexts: list[dict[str, Any]],
     domain_context: str | None = None,
     max_contexts: int = 4,
     excerpt_limit: int = 240,
@@ -78,8 +102,10 @@ def build_retrieval_answer_prompt(
     context_blocks: list[str] = []
     for index, context in enumerate(contexts[:max_contexts], start=1):
         source = str(context.get("source", "unknown"))
+        page_number = context.get("page_number")
+        source_label = _format_source_reference(source=source, page_number=page_number if isinstance(page_number, int) else None)
         text = trim_excerpt(str(context.get("text", "")), limit=excerpt_limit)
-        context_blocks.append(f"[{index}] {source}: {text}")
+        context_blocks.append(f"[{index}] {source_label}: {text}")
 
     joined_context = "\\n".join(context_blocks) if context_blocks else "No retrieved context available."
     domain_block = f"Domain: {domain_context.strip()}\\n" if domain_context and domain_context.strip() else ""
@@ -364,7 +390,7 @@ def _postprocess_llm_answer(query: str, answer: str) -> str:
     return answer
 
 
-def fallback_retrieval_answer(query: str, contexts: list[dict[str, str]]) -> tuple[str, float]:
+def fallback_retrieval_answer(query: str, contexts: list[dict[str, Any]]) -> tuple[str, float]:
     if not contexts:
         return (
             "I could not find enough indexed context to answer this question. Try refining the query or reindexing training material.",
@@ -372,13 +398,7 @@ def fallback_retrieval_answer(query: str, contexts: list[dict[str, str]]) -> tup
         )
 
     selected = contexts[:6]
-    source_names: list[str] = []
-    source_seen: set[str] = set()
-    for item in selected:
-        source = str(item.get("source", "unknown")).strip()
-        if source and source not in source_seen:
-            source_seen.add(source)
-            source_names.append(source)
+    source_names = _collect_source_references(selected, limit=4)
 
     sentence_candidates: list[str] = []
     keyword_sentence_candidates: list[str] = []

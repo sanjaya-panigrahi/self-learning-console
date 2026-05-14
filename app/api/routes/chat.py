@@ -91,10 +91,11 @@ def chat(payload: ChatRequest) -> ChatResponse:
         store.append(payload.session_id, str(input_guard.get("query") or payload.query), role="user")
         store.append(payload.session_id, safe_answer, role="assistant")
 
+    model_used = str(response.get("answer_model", "") or "").strip()
     return {
         "answer": safe_answer,
+        "model": model_used,
         "citations": response.get("citations", []) or [],
-        "confidence": float(response.get("answer_confidence", 0.0) or 0.0),
     }
 
 

@@ -9,6 +9,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import httpx
 
@@ -342,6 +343,36 @@ def _build_response_payload(question: str, answer: str, source: str, chunk_ids: 
     }
 
 
+def _source_alias_queries(source: str) -> list[str]:
+    source_name = Path(unquote(source)).name.strip()
+    if not source_name:
+        return []
+
+    stem = Path(source_name).stem.strip()
+    readable_stem = re.sub(r"[_-]+", " ", stem)
+    readable_stem = re.sub(r"\s+", " ", readable_stem).strip()
+
+    aliases: list[str] = []
+    for candidate in [source_name, stem, readable_stem, f"{readable_stem} pdf" if source_name.lower().endswith(".pdf") else ""]:
+        normalized = re.sub(r"\s+", " ", str(candidate or "")).strip()
+        if normalized and normalized.lower() not in {alias.lower() for alias in aliases}:
+            aliases.append(normalized)
+    return aliases
+
+
+def _build_source_alias_answer(source: str, chunk_texts: list[str]) -> str:
+    source_name = Path(unquote(source)).name.strip() or source
+    summary = ""
+    for text in chunk_texts:
+        cleaned = " ".join(str(text).split()).strip()
+        if cleaned:
+            summary = cleaned[:420].rstrip()
+            break
+    if summary:
+        return f"This document is {source_name}. Matching content starts with: {summary}"
+    return f"This document is {source_name}."
+
+
 def _process_source(source: str, chunks: list[dict[str, Any]], model: str) -> dict[str, Any]:
     settings = get_settings()
     retries = max(int(getattr(settings, "warm_cache_retry_max", 2)), 0)
@@ -392,8 +423,12 @@ def _process_source(source: str, chunks: list[dict[str, Any]], model: str) -> di
         if not qa_items:
             return {"inserted": 0, "complete": True, "error": ""}
 
-    inserted = 0
-    failed_reasons: dict[str, int] = defaultdict(int)
+    primary_inserted = 0
+    primary_failed_reasons: dict[str, int] = defaultdict(int)
+    alias_inserted = 0
+    alias_failed_reasons: dict[str, int] = defaultdict(int)
+    alias_queries = _source_alias_queries(source)
+    alias_answer = _build_source_alias_answer(source, chunk_texts)
     for item in qa_items:
         response_payload = _build_response_payload(
             question=item["question"],
@@ -413,25 +448,56 @@ def _process_source(source: str, chunks: list[dict[str, Any]], model: str) -> di
             score=float(item["confidence"]),
         )
         if ok:
-            inserted += 1
+            primary_inserted += 1
         else:
-            failed_reasons[str(reason or "unknown_upsert_failure")] += 1
+            primary_failed_reasons[str(reason or "unknown_upsert_failure")] += 1
 
-    if qa_items and inserted == 0 and failed_reasons:
-        top_reason = max(failed_reasons.items(), key=lambda pair: pair[1])
+    if alias_queries:
+        for alias_query in alias_queries:
+            alias_payload = _build_response_payload(
+                question=alias_query,
+                answer=alias_answer,
+                source=source,
+                chunk_ids=chunk_ids,
+                confidence=0.92,
+                model=model,
+            )
+            ok, reason = upsert_semantic_cache_entry_detailed(
+                query=alias_query,
+                domain_context="",
+                response_payload=alias_payload,
+                source=f"{source}|{fingerprint}|alias",
+                generated_by_model=model,
+                kind="warm-alias",
+                score=0.92,
+            )
+            if ok:
+                alias_inserted += 1
+            else:
+                alias_failed_reasons[str(reason or "unknown_upsert_failure")] += 1
+
+    total_inserted = primary_inserted + alias_inserted
+
+    if qa_items and primary_inserted == 0 and primary_failed_reasons:
+        top_reason = max(primary_failed_reasons.items(), key=lambda pair: pair[1])
         raise RuntimeError(
-            f"{source} cache upsert failed for {len(qa_items)} item(s): {top_reason[0]} x{top_reason[1]}"
+            f"{source} cache upsert failed for QA items ({primary_inserted}/{len(qa_items)}): {top_reason[0]} x{top_reason[1]}"
         )
 
-    if failed_reasons:
-        top_reason = max(failed_reasons.items(), key=lambda pair: pair[1])
+    if primary_failed_reasons:
+        top_reason = max(primary_failed_reasons.items(), key=lambda pair: pair[1])
         return {
-            "inserted": inserted,
+            "inserted": total_inserted,
             "complete": False,
-            "error": f"{source} cache upsert partial failure: {top_reason[0]} x{top_reason[1]} (inserted={inserted}/{len(qa_items)})",
+            "error": (
+                f"{source} cache upsert partial failure: {top_reason[0]} x{top_reason[1]} "
+                f"(qa_inserted={primary_inserted}/{len(qa_items)}, alias_inserted={alias_inserted}/{len(alias_queries)})"
+            ),
         }
 
-    return {"inserted": inserted, "complete": True, "error": ""}
+    # Alias upserts improve discoverability for source-name queries but should not fail the document
+    # when primary QA items are inserted successfully.
+    return {"inserted": total_inserted, "complete": True, "error": ""}
 
 
 def _run_job() -> None:

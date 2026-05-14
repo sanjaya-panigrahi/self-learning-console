@@ -113,7 +113,7 @@ def lexical_context_search(
     query: str,
     items: list[dict[str, str | list[float]]],
     k: int,
-) -> list[dict[str, str]]:
+) -> list[dict[str, str | int]]:
     """Score and rank items against a query using term-overlap lexical scoring.
 
     Combines phrase hits, exact token hits, source token hits, and overlap
@@ -171,11 +171,16 @@ def lexical_context_search(
     scored_lexical.sort(key=lambda row: row[0], reverse=True)
     top_items = scored_lexical[:k]
     return [
-        {
+        ({
             "source": sanitize_source_label(str(item.get("source", "unknown"))),
             "chunk_id": str(item.get("chunk_id", "chunk-unknown")),
             "text": str(item.get("text", "")),
-        }
+            **(
+                {"page_number": int(item.get("page_number", 0))}
+                if item.get("page_number") is not None
+                else {}
+            ),
+        })
         for _, item in top_items
         if str(item.get("text", ""))
     ]

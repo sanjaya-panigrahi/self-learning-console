@@ -6,6 +6,42 @@ from typing import Any
 from pypdf import PdfReader
 
 
+def _extract_pdf_metadata(reader: PdfReader) -> dict[str, Any]:
+    """Extract document-level metadata from PDF.
+
+    Args:
+        reader: PyPDF reader instance
+
+    Returns:
+        Dict with metadata fields: title, author, subject, creator, creation_date, modified_date
+    """
+    metadata = {}
+    try:
+        doc_info = reader.metadata
+        if doc_info:
+            # Extract standard metadata fields
+            if "/Title" in doc_info:
+                metadata["doc_title"] = str(doc_info["/Title"]).strip()
+            if "/Author" in doc_info:
+                metadata["doc_author"] = str(doc_info["/Author"]).strip()
+            if "/Subject" in doc_info:
+                metadata["doc_subject"] = str(doc_info["/Subject"]).strip()
+            if "/Creator" in doc_info:
+                metadata["doc_creator"] = str(doc_info["/Creator"]).strip()
+            if "/CreationDate" in doc_info:
+                metadata["doc_creation_date"] = str(doc_info["/CreationDate"]).strip()
+            if "/ModDate" in doc_info:
+                metadata["doc_modified_date"] = str(doc_info["/ModDate"]).strip()
+            
+            # Add page count
+            metadata["doc_page_count"] = len(reader.pages)
+    except Exception:
+        # Gracefully handle metadata extraction errors
+        pass
+    
+    return metadata
+
+
 def read_text_file(file_path: Path) -> str:
     """Read plain text file.
 
@@ -28,28 +64,62 @@ def read_pdf_file(file_path: Path) -> tuple[str, dict[str, Any]]:
         Tuple of (extracted_text, metadata)
     """
     reader = PdfReader(str(file_path))
-    pages = [page.extract_text() or "" for page in reader.pages]
-    extracted_text = "\n".join(page.strip() for page in pages if page.strip())
+    
+    # Extract document metadata
+    doc_metadata = _extract_pdf_metadata(reader)
+    
+    # Extract text with page number tracking
+    pages_with_numbers = []
+    for page_num, page in enumerate(reader.pages, start=1):
+        text = page.extract_text() or ""
+        if text.strip():
+            pages_with_numbers.append({"page": page_num, "text": text.strip()})
+    
+    extracted_text = "\n".join(p["text"] for p in pages_with_numbers)
 
     from app.core.config.settings import get_settings
 
     settings = get_settings()
     if not bool(getattr(settings, "ingestion_ocr_enabled", False)):
-        return extracted_text, {"ocr_used": False, "ocr_pages": 0, "ingestion_method": "pdf_text"}
+        return extracted_text, {
+            "ocr_used": False,
+            "ocr_pages": 0,
+            "ingestion_method": "pdf_text",
+            "pages_with_text": pages_with_numbers,
+            **doc_metadata
+        }
 
     min_chars = max(1, int(getattr(settings, "ingestion_ocr_min_chars", 120)))
     if len(extracted_text.strip()) >= min_chars:
-        return extracted_text, {"ocr_used": False, "ocr_pages": 0, "ingestion_method": "pdf_text"}
+        return extracted_text, {
+            "ocr_used": False,
+            "ocr_pages": 0,
+            "ingestion_method": "pdf_text",
+            "pages_with_text": pages_with_numbers,
+            **doc_metadata
+        }
 
     ocr_text, ocr_pages = _read_pdf_file_with_ocr(file_path)
     if not ocr_text.strip():
-        return extracted_text, {"ocr_used": False, "ocr_pages": 0, "ingestion_method": "pdf_text"}
+        return extracted_text, {
+            "ocr_used": False,
+            "ocr_pages": 0,
+            "ingestion_method": "pdf_text",
+            "pages_with_text": pages_with_numbers,
+            **doc_metadata
+        }
 
     if extracted_text.strip():
         combined = f"{extracted_text}\n\n{ocr_text}".strip()
     else:
         combined = ocr_text.strip()
-    return combined, {"ocr_used": True, "ocr_pages": ocr_pages, "ingestion_method": "pdf_text_plus_ocr"}
+    return combined, {
+        "ocr_used": True,
+        "ocr_pages": ocr_pages,
+        "ingestion_method": "pdf_text_plus_ocr",
+        "pages_with_text": pages_with_numbers,
+        **doc_metadata
+    }
 
 
 def _read_pdf_file_with_ocr(file_path: Path) -> tuple[str, int]:

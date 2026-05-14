@@ -1496,6 +1496,19 @@ button {
   line-height: 1.4;
 }
 
+.insight-list .suggested-question-button.is-selected {
+  background: #d6ebe4;
+  border-color: #7db7a1;
+  color: #0f3d2f;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px rgba(125, 183, 161, 0.25);
+}
+
+.insight-list .suggested-question-button.is-selected:hover:not(:disabled) {
+  background: #c9e4da;
+  transform: translateY(-1px);
+}
+
 .insight-two-column {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

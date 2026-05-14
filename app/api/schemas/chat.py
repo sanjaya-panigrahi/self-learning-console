@@ -13,9 +13,10 @@ class ChatRequest(BaseModel):
 class Citation(BaseModel):
     source: str
     chunk_id: str
+    page_number: int | None = None
 
 
 class ChatResponse(BaseModel):
     answer: str
+    model: str = Field(default="", description="Model used to generate the answer")
     citations: list[Citation] = Field(default_factory=list)
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)

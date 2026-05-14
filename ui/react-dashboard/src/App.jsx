@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import uiText from './config/uiText.json'
 import IngestionTab from './components/tabs/IngestionTab'
-import ObservabilityTab from './components/tabs/ObservabilityTab'
+import OverviewTab from './components/tabs/OverviewTab'
 import RetrievalTab from './components/tabs/RetrievalTab'
 import WikiTab from './components/tabs/WikiTab'
 import {
@@ -35,7 +35,7 @@ const DASHBOARD_MODES = {
 
 const getAllowedTabs = (mode) =>
   mode === DASHBOARD_MODES.admin
-    ? ['overview', 'ingestion', 'retrieval', 'knowledge-search', 'observability', 'wiki']
+    ? ['overview', 'ingestion', 'retrieval', 'knowledge-search', 'wiki']
     : ['overview', 'retrieval', 'knowledge-search', 'wiki']
 
 const getDefaultTabForMode = (mode) => (mode === DASHBOARD_MODES.admin ? 'overview' : 'knowledge-search')
@@ -424,7 +424,7 @@ function App() {
     const effectiveQuery = String(queryOverride ?? retrievalSearch.query).trim()
     if (!effectiveQuery) {
       setActionMessage('Enter a retrieval question or topic to inspect indexed material.')
-      return
+      return null
     }
 
     setRetrievalLoading(true)
@@ -449,8 +449,10 @@ function App() {
         `retrieval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       )
       setActionMessage(`Retrieved ${result.result_count} relevant passages.`)
+      return result
     } catch (error) {
       setActionMessage(error.message)
+      return null
     } finally {
       setRetrievalLoading(false)
     }
@@ -565,7 +567,20 @@ function App() {
       setSelectedSuggestedQa({ question, answer: '' })
     }
 
-    await executeRetrievalSearch({ queryOverride: question, preserveSelectedQa: true })
+    const result = await executeRetrievalSearch({ queryOverride: question, preserveSelectedQa: true })
+    const liveAnswer = String(result?.answer || '').trim()
+    if (liveAnswer) {
+      const normalizedQuestion = normalizeQuestionKey(question)
+      setSelectedSuggestedQa((current) => {
+        if (!current || normalizeQuestionKey(current.question) !== normalizedQuestion) {
+          return current
+        }
+        return {
+          ...current,
+          answer: liveAnswer,
+        }
+      })
+    }
   }
 
   const fetchWikiPage = async (kind, name) => {
@@ -728,20 +743,13 @@ function App() {
 
   useEffect(() => {
     fetchLangsmithStatus()
-    if (activeTab === 'observability') {
-      fetchLangsmithTraces(langsmithTraceLimit)
-      fetchEvaluationSummary()
-      fetchWarmCacheStatus()
-      fetchDeployIntelStatus()
-      fetchPromptUsage()
-    }
     if (activeTab === 'wiki') {
       fetchWikiIndex({ resetPage: false })
     }
   }, [activeTab, langsmithTraceLimit])
 
   useEffect(() => {
-    if (activeTab !== 'observability') {
+    if (activeTab !== 'overview') {
       return undefined
     }
 
@@ -1179,27 +1187,6 @@ function App() {
       </aside>
 
       <main className="dashboard-content">
-        {activeTab === 'overview' && (
-          <section className="hero-card">
-            <div>
-              <p className="eyebrow">{text.overview.systemStatus}</p>
-              <h2>{ready?.status || 'loading'}</h2>
-              <p className="meta-line">
-                {text.overview.source}: {report?.source_dir || '-'}
-                <span>{text.overview.vectorBackend}: {report?.vector_backend || '-'}</span>
-              </p>
-            </div>
-            <div className="component-grid">
-              {Object.entries(ready?.components || {}).map(([name, component]) => (
-                <div key={name} className="component-card">
-                  <span>{name}</span>
-                  <strong>{component.status}</strong>
-                  <small>{component.reason || `HTTP ${component.status_code || '-'}`}</small>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
 
         <section className="tab-bar">
           <button
@@ -1233,52 +1220,29 @@ function App() {
           </button>
           {isAdminView && (
             <button
-              className={`tab-button ${activeTab === 'observability' ? 'tab-button-active' : ''}`}
-              onClick={() => setActiveTab('observability')}
+              className={`tab-button ${activeTab === 'wiki' ? 'tab-button-active' : ''}`}
+              onClick={() => setActiveTab('wiki')}
             >
-              <span>{text.tabs.observability}</span>
-              <span className="tab-badge">{langsmithStatus?.enabled ? '✓' : '-'}</span>
+              <span>{text.tabs.wiki}</span>
+              <span className="tab-badge">{wikiIndex ? `${totalWikiPageCount}p` : '-'}</span>
             </button>
           )}
-          <button
-            className={`tab-button ${activeTab === 'wiki' ? 'tab-button-active' : ''}`}
-            onClick={() => setActiveTab('wiki')}
-          >
-            <span>{text.tabs.wiki}</span>
-            <span className="tab-badge">{wikiIndex ? `${totalWikiPageCount}p` : '-'}</span>
-          </button>
         </section>
 
         {activeTab === 'overview' && (
-          <>
-            <section className="stats-grid">
-              <StatCard label={text.overview.stats.processedFiles} value={report?.processed_files ?? '-'} />
-              <StatCard label={text.overview.stats.indexedChunks} value={report?.indexed_chunks ?? '-'} tone="success" />
-              <StatCard
-                label={text.overview.stats.piiDetected}
-                value={report?.password_detected_files ?? report?.pii_detected_files ?? '-'}
-                tone="warning"
-              />
-              <StatCard label={text.overview.stats.pendingReview} value={report?.pending_review_files ?? '-'} tone="danger" />
-            </section>
-
-            <section className="stats-grid retrieval-stats-grid">
-              <StatCard label={text.overview.stats.materialLibrary} value={retrievalOverview?.material_count ?? '-'} />
-              <StatCard label={text.overview.stats.searchableItems} value={retrievalOverview?.searchable_material_count ?? '-'} tone="success" />
-              <StatCard label={text.overview.stats.blockedMaterials} value={retrievalOverview?.blocked_material_count ?? '-'} tone="warning" />
-              <StatCard label={text.overview.stats.failedMaterials} value={retrievalOverview?.failed_material_count ?? '-'} tone="danger" />
-            </section>
-
-            <section className="stats-grid retrieval-stats-grid">
-              <StatCard label={text.wiki.sourcePages} value={wikiIndex?.source_count ?? '-'} />
-              <StatCard label={text.wiki.entityPages} value={wikiIndex?.entity_count ?? '-'} />
-              <StatCard label={text.wiki.conceptPages} value={wikiIndex?.concept_count ?? '-'} />
-              <div className="stat-card stat-card-default">
-                <span>{text.wiki.wikiDir}</span>
-                <strong style={{ fontSize: '11px', wordBreak: 'break-all' }}>{wikiIndex?.wiki_dir ?? '-'}</strong>
-              </div>
-            </section>
-          </>
+          <OverviewTab
+            text={text}
+            ready={ready}
+            report={report}
+            retrievalOverview={retrievalOverview}
+            wikiIndex={wikiIndex}
+            warmCacheStatus={warmCacheStatus}
+            semanticCacheStats={semanticCacheStats}
+            deployIntelStatus={deployIntelStatus}
+            langsmithStatus={langsmithStatus}
+            evaluationSummary={evaluationSummary}
+            formatStageLabel={formatStageLabel}
+          />
         )}
 
         {activeTab === 'ingestion' && (
@@ -1391,34 +1355,6 @@ function App() {
           />
         )}
 
-        {activeTab === 'observability' && (
-          <ObservabilityTab
-            text={text}
-            langsmithStatus={langsmithStatus}
-            evaluationLoading={evaluationLoading}
-            evaluationSummary={evaluationSummary}
-            warmCacheActionLoading={warmCacheActionLoading}
-            runWarmCache={runWarmCache}
-            clearSemanticCache={clearSemanticCache}
-            warmCacheStatus={warmCacheStatus}
-            semanticCacheStats={semanticCacheStats}
-            warmCacheMessage={warmCacheMessage}
-            deployIntelStatus={deployIntelStatus}
-            fetchDeployIntelStatus={fetchDeployIntelStatus}
-            clearingSearchCache={clearingSearchCache}
-            clearRetrievalSearchCache={clearRetrievalSearchCache}
-            searchCacheClearedMsg={searchCacheClearedMsg}
-            langsmithTraceLimit={langsmithTraceLimit}
-            setLangsmithTraceLimit={setLangsmithTraceLimit}
-            langsmithTracesLoading={langsmithTracesLoading}
-            langsmithTraces={langsmithTraces}
-            buildLangsmithTraceUrl={buildLangsmithTraceUrl}
-            formatStageLabel={formatStageLabel}
-            promptUsage={promptUsage}
-            promptUsageLoading={promptUsageLoading}
-            fetchPromptUsage={fetchPromptUsage}
-          />
-        )}
 
         {activeTab === 'wiki' && (
           <WikiTab

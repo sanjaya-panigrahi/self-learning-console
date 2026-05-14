@@ -5,10 +5,12 @@ from app.api.routes.admin_schemas import (
     FeedbackRecordRequest,
     MaterialInsightRequest,
     RetrievalSearchRequest,
+    SeedSuggestedQuestionsRequest,
     WarmCacheRunRequest,
 )
 from app.feedback.collector.service import get_feedback_summary, record_feedback
 from app.jobs.ingestion import get_ingestion_status
+from app.jobs.seed_questions import run_seed_suggested_questions
 from app.jobs.warm_cache import get_warm_cache_status, trigger_warm_cache_job
 from app.retrieval.insights import clear_material_insight_cache, get_material_insight
 from app.retrieval.service import (
@@ -93,6 +95,21 @@ def warm_cache_run(request: WarmCacheRunRequest) -> dict[str, object]:
 @router.get("/warm-cache/status")
 def warm_cache_status() -> dict[str, object]:
     return get_warm_cache_status()
+
+
+@router.post("/seed-suggested-questions")
+def seed_suggested_questions(request: SeedSuggestedQuestionsRequest) -> dict[str, object]:
+    """Pre-seed the semantic cache with answers for all suggested questions.
+
+    Reads ``suggested_questions`` from every material-insight cache entry,
+    runs each through the live retrieval pipeline, and stores the answers in
+    the semantic cache so users get instant responses when they click a
+    suggested question in the UI.
+    """
+    return run_seed_suggested_questions(
+        force=request.force,
+        concurrency=request.concurrency,
+    )
 
 
 @router.post("/feedback")

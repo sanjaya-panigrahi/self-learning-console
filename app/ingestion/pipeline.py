@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from app.core.config.settings import get_settings
-from app.ingestion.chunking import chunk_text
+from app.ingestion.chunking import chunk_text_with_metadata
 from app.ingestion.lifecycle import (
     build_data_lifecycle_manifest,
     ensure_data_lifecycle_dirs,
@@ -37,6 +37,10 @@ __all__ = [
     "get_pending_pii_reviews",
     "SUPPORTED_SOURCE_SUFFIXES",
 ]
+
+
+# Bump this when chunk payload schema changes so cached chunks are rebuilt.
+INGESTION_SCHEMA_VERSION = 2
 
 
 def get_pending_pii_reviews() -> list[dict[str, Any]]:
@@ -279,7 +283,11 @@ def run_ingestion(
         except OSError:
             current_mtime = 0.0
         prev = manifest.get(relative_path)
-        if prev and prev.get("mtime") == current_mtime:
+        if (
+            prev
+            and prev.get("mtime") == current_mtime
+            and int(prev.get("index_schema_version", 0) or 0) == INGESTION_SCHEMA_VERSION
+        ):
             # mtime matches — reuse cached chunks without reading the file
             cached_chunks = existing_items_by_source.get(relative_path, [])
             if cached_chunks:
@@ -385,19 +393,34 @@ def run_ingestion(
             _emit_progress(file_results[-1])
             continue
 
-        # Chunk and embed using modular chunking
-        chunks = chunk_text(content, settings.chunk_size_chars, settings.chunk_overlap_chars)
+        # Chunk and embed using modular chunking with page tracking
+        pages_with_text = read_meta.get("pages_with_text", [])
+        chunks_with_metadata = chunk_text_with_metadata(
+            content, 
+            settings.chunk_size_chars, 
+            settings.chunk_overlap_chars,
+            pages_with_text=pages_with_text
+        )
         indexed_chunks = 0
-        for idx, chunk in enumerate(chunks, start=1):
-            embedding = _embed_text(chunk)
-            items.append(
-                {
-                    "source": relative_path,
-                    "chunk_id": f"{file_path.stem}-chunk-{idx:04d}",
-                    "text": chunk,
-                    "embedding": embedding,
-                }
-            )
+        for idx, chunk_info in enumerate(chunks_with_metadata, start=1):
+            embedding = _embed_text(chunk_info["text"])
+            chunk_data = {
+                "source": relative_path,
+                "chunk_id": f"{file_path.stem}-chunk-{idx:04d}",
+                "text": chunk_info["text"],
+                "embedding": embedding,
+            }
+            # Add page number if available
+            if chunk_info.get("page") is not None:
+                chunk_data["page_number"] = chunk_info["page"]
+            
+            # Add document metadata if available
+            for key in ["doc_title", "doc_author", "doc_subject", "doc_creator", 
+                        "doc_creation_date", "doc_modified_date", "doc_page_count"]:
+                if key in read_meta:
+                    chunk_data[key] = read_meta[key]
+            
+            items.append(chunk_data)
             indexed_chunks += 1
 
         file_results.append(
@@ -424,7 +447,16 @@ def run_ingestion(
             "ingestion_method": str(read_meta.get("ingestion_method", "unknown")),
             "ocr_used": bool(read_meta.get("ocr_used", False)),
             "ocr_pages": int(read_meta.get("ocr_pages", 0) or 0),
+            "index_schema_version": INGESTION_SCHEMA_VERSION,
             "indexed_at": time.time(),
+            # Store document metadata in manifest
+            "doc_title": read_meta.get("doc_title"),
+            "doc_author": read_meta.get("doc_author"),
+            "doc_subject": read_meta.get("doc_subject"),
+            "doc_creator": read_meta.get("doc_creator"),
+            "doc_creation_date": read_meta.get("doc_creation_date"),
+            "doc_modified_date": read_meta.get("doc_modified_date"),
+            "doc_page_count": read_meta.get("doc_page_count"),
         }
 
     # Save local index

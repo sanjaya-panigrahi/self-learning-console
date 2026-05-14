@@ -41,6 +41,7 @@ def upsert_items(items: list[dict[str, Any]]) -> dict[str, Any]:
                 "source": item["source"],
                 "chunk_id": item["chunk_id"],
                 "text": item["text"],
+                "page_number": item.get("page_number"),
             },
         )
         for item in vector_items
@@ -49,7 +50,7 @@ def upsert_items(items: list[dict[str, Any]]) -> dict[str, Any]:
     return {"status": "synced", "points_upserted": len(points)}
 
 
-def search_items(query_vector: list[float], top_k: int) -> list[dict[str, str]]:
+def search_items(query_vector: list[float], top_k: int) -> list[dict[str, Any]]:
     settings = get_settings()
     if not query_vector:
         return []
@@ -65,6 +66,7 @@ def search_items(query_vector: list[float], top_k: int) -> list[dict[str, str]]:
             "source": str(hit.payload.get("source", "unknown")),
             "chunk_id": str(hit.payload.get("chunk_id", "chunk-unknown")),
             "text": str(hit.payload.get("text", "")),
+            "page_number": hit.payload.get("page_number"),
         }
         for hit in hits
     ]

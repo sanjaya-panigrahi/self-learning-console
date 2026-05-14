@@ -1,6 +1,6 @@
 """Retrieval pipeline orchestrator - coordinates context retrieval for RAG."""
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from app.core.config.settings import get_settings
 from app.core.observability.langsmith import traceable
@@ -25,6 +25,7 @@ class RetrievedContext(TypedDict):
     source: str
     chunk_id: str
     text: str
+    page_number: NotRequired[int]
 
 
 @traceable(
@@ -57,6 +58,7 @@ def retrieve_context(query: str, top_k: int | None = None) -> list[RetrievedCont
                         source=_sanitize_source_label(str(item.get("source", "unknown"))),
                         chunk_id=str(item.get("chunk_id", "chunk-unknown")),
                         text=str(item.get("text", "")),
+                        page_number=int(item["page_number"]) if item.get("page_number") is not None else None,
                     )
                     for item in qdrant_hits
                 ]
@@ -91,6 +93,7 @@ def retrieve_context(query: str, top_k: int | None = None) -> list[RetrievedCont
             source=_sanitize_source_label(str(item.get("source", "unknown"))),
             chunk_id=str(item.get("chunk_id", "chunk-unknown")),
             text=str(item.get("text", "")),
+            page_number=int(item["page_number"]) if item.get("page_number") is not None else None,
         )
         for _, item in top_items
     ]

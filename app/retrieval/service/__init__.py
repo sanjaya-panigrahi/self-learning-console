@@ -253,10 +253,21 @@ def _wiki_response(
     final_answer_payload = wiki_rule_payload if fallback_reason else wiki_llm_payload
 
     citations: list[RetrievalCitation] = [
-        {
+        ({
             "source": context["source"],
             "chunk_id": context["chunk_id"],
-        }
+            **(
+                {
+                    "page_number": int(context["page_number"]),
+                    "page_document_url": _build_page_document_url(
+                        source=context["source"],
+                        page_number=int(context["page_number"]),
+                    ),
+                }
+                if context.get("page_number") is not None
+                else {}
+            ),
+        })
         for context in contexts[:4]
     ]
     results: list[RetrievalResultItem] = [
@@ -265,6 +276,17 @@ def _wiki_response(
             "chunk_id": context["chunk_id"],
             "excerpt": _trim_excerpt(context["text"], limit=320),
             "page_image_url": "",
+            **(
+                {
+                    "page_number": int(context["page_number"]),
+                    "page_document_url": _build_page_document_url(
+                        source=context["source"],
+                        page_number=int(context["page_number"]),
+                    ),
+                }
+                if context.get("page_number") is not None
+                else {}
+            ),
         }
         for context in contexts
     ]
@@ -393,8 +415,14 @@ def _render_pdf_preview(source_path: Path) -> Path | None:
     return render_pdf_preview(source_path)
 
 
-def render_chunk_page_image(source: str, chunk_text: str) -> Path | None:
-    return render_visual_chunk_page_image(source, chunk_text)
+def render_chunk_page_image(source: str, chunk_text: str, page_number: int | None = None) -> Path | None:
+    return render_visual_chunk_page_image(source, chunk_text, page_number=page_number)
+
+
+def _build_page_document_url(source: str, page_number: int | None) -> str:
+    if page_number is None:
+        return ""
+    return f"/api/admin/visual-reference-document?source={quote(source, safe='')}#page={page_number}"
 
 
 def _build_visual_references(sources: list[str]) -> list[RetrievalVisualReference]:
@@ -533,6 +561,60 @@ def _promote_preferred_sources(
     return selected
 
 
+def _source_alias_queries(source: str) -> list[str]:
+    source_name = Path(source).name.strip()
+    if not source_name:
+        return []
+
+    stem = Path(source_name).stem.strip()
+    readable_stem = re.sub(r"[_-]+", " ", stem)
+    readable_stem = re.sub(r"\s+", " ", readable_stem).strip()
+
+    aliases: list[str] = []
+    for candidate in [source_name, stem, readable_stem, f"{readable_stem} pdf" if source_name.lower().endswith(".pdf") else ""]:
+        normalized = re.sub(r"\s+", " ", str(candidate or "")).strip()
+        if normalized and normalized.lower() not in {alias.lower() for alias in aliases}:
+            aliases.append(normalized)
+    return aliases
+
+
+def _find_source_alias_semantic_hit(query: str, domain_context: str | None) -> dict[str, Any] | None:
+    candidate_sources: list[tuple[float, str]] = []
+    seen_sources: set[str] = set()
+    for item in _load_local_index_items():
+        source = str(item.get("source", "")).strip()
+        if not source or source in seen_sources:
+            continue
+        seen_sources.add(source)
+        source_name = Path(source).name.strip() or source
+        score = _keyword_relevance_score(query=query, source=source_name, text=source_name)
+        if score <= 0:
+            continue
+        candidate_sources.append((score, source))
+
+    if not candidate_sources:
+        return None
+
+    candidate_sources.sort(key=lambda item: item[0], reverse=True)
+    best_hit: dict[str, Any] | None = None
+    for _, source in candidate_sources[:3]:
+        for alias_query in _source_alias_queries(source):
+            try:
+                semantic_hit = find_semantic_cache_hit(query=alias_query, domain_context=domain_context)
+            except Exception as exc:
+                logger.debug("source-alias semantic cache lookup failed (non-critical): %s", exc)
+                semantic_hit = None
+            if semantic_hit is None:
+                continue
+            semantic_hit = dict(semantic_hit)
+            semantic_hit["source"] = f"{semantic_hit.get('source', 'semantic-cache')}|source-alias"
+            semantic_hit["matched_source"] = source
+            semantic_hit["matched_alias_query"] = alias_query
+            if best_hit is None or float(semantic_hit.get("score", 0.0) or 0.0) > float(best_hit.get("score", 0.0) or 0.0):
+                best_hit = semantic_hit
+    return best_hit
+
+
 # Domain seed dictionary: known acronyms in the aviation / travel-tech space that may not be
 # spelled out explicitly in indexed material.  Keys are uppercase acronym strings.
 def _domain_seed_expansion(acronym: str) -> str | None:
@@ -626,6 +708,9 @@ def search_retrieval_material(
                 semantic_hit = None
 
             if semantic_hit is None:
+                semantic_hit = _find_source_alias_semantic_hit(query=query_clean, domain_context=domain_context)
+
+            if semantic_hit is None:
                 try:
                     similar_query_match = find_similar_query(query=query_clean, domain_context=domain_context)
                 except Exception as exc:
@@ -668,6 +753,12 @@ def search_retrieval_material(
             similar_query_info = semantic_hit.get("similar_query")
             if isinstance(similar_query_info, dict):
                 semantic_payload["similar_query"] = dict(similar_query_info)
+            matched_alias_query = str(semantic_hit.get("matched_alias_query", "")).strip()
+            if matched_alias_query:
+                semantic_payload["matched_alias_query"] = matched_alias_query
+            matched_source = str(semantic_hit.get("matched_source", "")).strip()
+            if matched_source:
+                semantic_payload["matched_source"] = matched_source
             return semantic_payload
 
         normalized_query = normalize_training_question_query(query_clean)
@@ -796,10 +887,21 @@ def search_retrieval_material(
         )
 
         citations: list[RetrievalCitation] = [
-            {
+            ({
                 "source": context["source"],
                 "chunk_id": context["chunk_id"],
-            }
+                **(
+                    {
+                        "page_number": int(context["page_number"]),
+                        "page_document_url": _build_page_document_url(
+                            source=context["source"],
+                            page_number=int(context["page_number"]),
+                        ),
+                    }
+                    if context.get("page_number") is not None
+                    else {}
+                ),
+            })
             for context in contexts[:4]
         ]
         visual_references = _build_visual_references([context["source"] for context in contexts])
@@ -810,6 +912,7 @@ def search_retrieval_material(
                 img_path = render_chunk_page_image(
                     source=str(context["source"]),
                     chunk_text=str(context.get("text", "")),
+                    page_number=int(context["page_number"]) if context.get("page_number") is not None else None,
                 )
                 if img_path:
                     page_image = f"/visual-previews/{quote(img_path.name)}"
@@ -819,6 +922,17 @@ def search_retrieval_material(
                     "chunk_id": context["chunk_id"],
                     "excerpt": _trim_excerpt(context["text"], limit=320),
                     "page_image_url": page_image,
+                    **(
+                        {
+                            "page_number": int(context["page_number"]),
+                            "page_document_url": _build_page_document_url(
+                                source=context["source"],
+                                page_number=int(context["page_number"]),
+                            ),
+                        }
+                        if context.get("page_number") is not None
+                        else {}
+                    ),
                 }
             )
 

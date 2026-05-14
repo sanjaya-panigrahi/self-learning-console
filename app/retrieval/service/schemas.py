@@ -1,9 +1,11 @@
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class RetrievalCitation(TypedDict):
     source: str
     chunk_id: str
+    page_number: NotRequired[int]
+    page_document_url: NotRequired[str]
 
 
 class RetrievalResultItem(TypedDict):
@@ -11,6 +13,8 @@ class RetrievalResultItem(TypedDict):
     chunk_id: str
     excerpt: str
     page_image_url: str
+    page_number: NotRequired[int]
+    page_document_url: NotRequired[str]
 
 
 class RetrievalVisualReference(TypedDict):

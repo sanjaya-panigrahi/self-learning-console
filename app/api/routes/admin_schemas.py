@@ -37,6 +37,11 @@ class WarmCacheRunRequest(BaseModel):
     force: bool = False
 
 
+class SeedSuggestedQuestionsRequest(BaseModel):
+    force: bool = False
+    concurrency: int = Field(default=3, ge=1, le=8)
+
+
 class BenchmarkRunRequest(BaseModel):
     max_cases: int = Field(default=8, ge=1, le=50)
 

@@ -84,6 +84,8 @@ export default function RetrievalTab({
     return deduped
   }, [materialInsight])
 
+  const selectedSuggestedQuestionNorm = normalizeQuestion(selectedSuggestedQa?.question)
+
   const answerSlides = useMemo(() => {
     const selectedQuestion = String(selectedSuggestedQa?.question || '').trim()
     if (!selectedQuestion) {
@@ -95,7 +97,9 @@ export default function RetrievalTab({
 
     const slides = []
 
-    const liveQueryNorm = normalizeQuestion(retrievalResults?.retrieval_query || retrievalSearch?.query)
+    const liveQueryNorm = normalizeQuestion(
+      retrievalResults?.query || retrievalResults?.retrieval_query || retrievalSearch?.query,
+    )
     const liveAnswer = String(retrievalResults?.answer || '').trim()
     if (
       liveAnswer
@@ -107,7 +111,7 @@ export default function RetrievalTab({
       slides.push({
         id: `live-${selectedQuestionNorm}`,
         title: text.retrieval.liveSearchAnswerTitle ?? 'Live knowledge-search answer',
-        question: retrievalResults?.retrieval_query || retrievalSearch?.query || selectedQuestion,
+        question: retrievalResults?.query || retrievalResults?.retrieval_query || retrievalSearch?.query || selectedQuestion,
         answer: liveAnswer,
       })
     }
@@ -262,17 +266,21 @@ export default function RetrievalTab({
                     <div>
                       <span className="insight-label">{text.retrieval.suggestedQuestions}</span>
                       <ul className="insight-list">
-                        {suggestedQuestions.map((question) => (
-                          <li key={question}>
-                            <button
-                              type="button"
-                              className="ghost-inline-button"
-                              onClick={() => onSuggestedQuestionSelect?.(question)}
-                            >
-                              {question}
-                            </button>
-                          </li>
-                        ))}
+                        {suggestedQuestions.map((question) => {
+                          const isSelected = normalizeQuestion(question) === selectedSuggestedQuestionNorm
+                          return (
+                            <li key={question}>
+                              <button
+                                type="button"
+                                className={`ghost-inline-button suggested-question-button${isSelected ? ' is-selected' : ''}`}
+                                onClick={() => onSuggestedQuestionSelect?.(question)}
+                                aria-pressed={isSelected}
+                              >
+                                {question}
+                              </button>
+                            </li>
+                          )
+                        })}
                       </ul>
                     </div>
 
@@ -286,6 +294,7 @@ export default function RetrievalTab({
                               <strong>{liveAnswerSlide?.question || retrievalSearch?.query || selectedSuggestedQa?.question}</strong>
                               <p>
                                 {liveAnswerSlide?.answer
+                                  || String(selectedSuggestedQa?.answer || '').trim()
                                   || (text.retrieval.runMatchingSearch
                                     ?? 'Run a matching Knowledge search for this question to view a live answer here.')}
                               </p>

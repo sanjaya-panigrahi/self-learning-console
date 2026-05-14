@@ -22,7 +22,7 @@ if errors:
 }
 
 print_deploy_intelligence() {
-  echo "=== deploy-intelligence ==="
+  echo "=== Knowledge Builder ==="
   curl -fsS "$BASE_URL/api/admin/deploy-intelligence/status" | python3 -c '
 import json
 import sys

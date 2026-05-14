@@ -49,7 +49,7 @@ def render_pdf_preview(source_path: Path) -> Path | None:
         return None
 
 
-def render_chunk_page_image(source: str, chunk_text: str) -> Path | None:
+def render_chunk_page_image(source: str, chunk_text: str, page_number: int | None = None) -> Path | None:
     source_path = resolve_visual_reference_source(source)
     if not source_path or source_path.suffix.lower() != ".pdf" or not source_path.exists():
         return None
@@ -62,22 +62,28 @@ def render_chunk_page_image(source: str, chunk_text: str) -> Path | None:
     preview_dir = visual_preview_dir()
     safe_stem = re.sub(r"[^a-zA-Z0-9_-]+", "-", source_path.stem).strip("-") or "doc"
     key_text = re.sub(r"[^a-zA-Z0-9]+", "-", chunk_text[:80].lower()).strip("-")
-    preview_path = preview_dir / f"{safe_stem}--chunk--{key_text}.png"
+    if page_number is not None and page_number > 0:
+        preview_path = preview_dir / f"{safe_stem}--page-{page_number}.png"
+    else:
+        preview_path = preview_dir / f"{safe_stem}--chunk--{key_text}.png"
     if preview_path.exists():
         return preview_path
 
     try:
-        search_snippet = " ".join(chunk_text.split()[:30])
         with fitz.open(source_path) as document:
-            best_page_idx = 0
-            best_score = 0
-            tokens = [t.lower() for t in search_snippet.split() if len(t) >= 4]
-            for page_idx in range(document.page_count):
-                page_text = document.load_page(page_idx).get_text("text").lower()
-                score = sum(1 for token in tokens if token in page_text)
-                if score > best_score:
-                    best_score = score
-                    best_page_idx = page_idx
+            if page_number is not None and page_number > 0:
+                best_page_idx = min(max(page_number - 1, 0), document.page_count - 1)
+            else:
+                search_snippet = " ".join(chunk_text.split()[:30])
+                best_page_idx = 0
+                best_score = 0
+                tokens = [t.lower() for t in search_snippet.split() if len(t) >= 4]
+                for page_idx in range(document.page_count):
+                    page_text = document.load_page(page_idx).get_text("text").lower()
+                    score = sum(1 for token in tokens if token in page_text)
+                    if score > best_score:
+                        best_score = score
+                        best_page_idx = page_idx
 
             page = document.load_page(best_page_idx)
             pixmap = page.get_pixmap(matrix=fitz.Matrix(1.6, 1.6), alpha=False)

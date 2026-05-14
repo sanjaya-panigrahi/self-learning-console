@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     ollama_circuit_breaker_recovery_seconds: int = 60  # NEW: Recovery timeout
     material_insight_skip_questions_on_timeout: bool = True
     material_insight_async_question_backfill_on_timeout: bool = True
-    material_insight_cache_ttl_seconds: int = 10800
+    material_insight_cache_ttl_seconds: int = 86400
     material_insight_cache_dir: str = str(PROJECT_ROOT / "data" / "indexes" / "material_insight_cache")
     material_insight_background_top_n: int = 3
     enable_query_rewrite: bool = True
@@ -88,12 +88,12 @@ class Settings(BaseSettings):
     retrieval_lexical_acronym_max_len: int = 6
     retrieval_answer_timeout_seconds: float = 20.0
     retrieval_search_cache_enabled: bool = True
-    retrieval_search_cache_ttl_seconds: int = 10800
+    retrieval_search_cache_ttl_seconds: int = 86400
     retrieval_search_cache_max_entries: int = 200
     cache_multilevel_enabled: bool = True  # NEW: Enable L1/L2/L3 caching
     cache_l1_max_size: int = 500  # NEW: In-memory cache size
-    cache_l1_ttl_seconds: int = 300  # NEW: L1 TTL (5 min)
-    cache_l2_ttl_seconds: int = 3600  # NEW: L2 TTL (1 hour)
+    cache_l1_ttl_seconds: int = 86400  # NEW: L1 TTL (24 hrs)
+    cache_l2_ttl_seconds: int = 86400  # NEW: L2 TTL (24 hrs)
     retrieval_wiki_first_enabled: bool = True
     retrieval_wiki_top_k: int = 4
     retrieval_wiki_min_score: float = 1.4
@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     semantic_cache_similarity_threshold: float = 0.88
     semantic_cache_mid_similarity_threshold: float = 0.80
     semantic_cache_top_k: int = 5
-    semantic_cache_ttl_days: int = 30
+    semantic_cache_ttl_days: int = 1
     semantic_cache_learn_from_runtime: bool = True
     semantic_cache_max_answer_chars: int = 2200
     semantic_cache_min_answer_chars: int = 60
@@ -126,7 +126,7 @@ class Settings(BaseSettings):
     query_similarity_top_k: int = 5
     exact_cache_backend: str = "memory"
     redis_url: str = "redis://127.0.0.1:6379/0"
-    redis_exact_cache_ttl_seconds: int = 10800
+    redis_exact_cache_ttl_seconds: int = 86400
     redis_exact_cache_prefix: str = "retrieval:exact"
     retrieval_llm_fallback_enabled: bool = True
     retrieval_llm_fallback_min_chars: int = 80
